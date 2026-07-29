@@ -59,10 +59,11 @@ const menuCount = (db.prepare('SELECT COUNT(*) as c FROM menu_items').get() as {
 if (menuCount === 0) {
   const seed = db.prepare('INSERT INTO menu_items (name, type, sort_order) VALUES (?, ?, ?)');
   const seedAll = db.transaction(() => {
-    [['아메리카노', 'cafe', 1], ['카페라떼', 'cafe', 2], ['녹차라떼', 'cafe', 3],
-     ['유자차', 'cafe', 4], ['레몬에이드', 'cafe', 5]].forEach(([n, t, o]) => seed.run(n, t, o));
-    [['비빔밥', 'food', 1], ['잡채', 'food', 2], ['불고기', 'food', 3],
-     ['김치볶음밥', 'food', 4], ['순두부찌개', 'food', 5]].forEach(([n, t, o]) => seed.run(n, t, o));
+    [['아이스티', 'cafe', 1], ['아이스커피', 'cafe', 2],
+     ['매실차', 'cafe', 3], ['생과일바나나주스', 'cafe', 4]].forEach(([n, t, o]) => seed.run(n, t, o));
+    [['멸치주먹밥', 'food', 1], ['참치마요주먹밥', 'food', 2],
+     ['짜장범벅', 'food', 3], ['육개장', 'food', 4],
+     ['세트메뉴(주먹밥2+컵라면1)', 'food', 5]].forEach(([n, t, o]) => seed.run(n, t, o));
   });
   seedAll();
 }
