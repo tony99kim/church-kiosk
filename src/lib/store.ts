@@ -16,6 +16,7 @@ export interface MenuItem {
   id: number;
   name: string;
   type: 'cafe' | 'food';
+  price: number;
   sortOrder: number;
 }
 
@@ -50,20 +51,24 @@ db.exec(`
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT    NOT NULL,
     type       TEXT    NOT NULL CHECK(type IN ('cafe','food')),
+    price      INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0
   );
 `);
 
+// 기존 EC2 DB에 price 컬럼 없으면 추가 (마이그레이션)
+try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
+
 // 최초 실행 시 기본 메뉴 시딩
 const menuCount = (db.prepare('SELECT COUNT(*) as c FROM menu_items').get() as { c: number }).c;
 if (menuCount === 0) {
-  const seed = db.prepare('INSERT INTO menu_items (name, type, sort_order) VALUES (?, ?, ?)');
+  const seed = db.prepare('INSERT INTO menu_items (name, type, price, sort_order) VALUES (?, ?, ?, ?)');
   const seedAll = db.transaction(() => {
-    [['아이스티', 'cafe', 1], ['아이스커피', 'cafe', 2],
-     ['매실차', 'cafe', 3], ['생과일바나나주스', 'cafe', 4]].forEach(([n, t, o]) => seed.run(n, t, o));
-    [['멸치주먹밥', 'food', 1], ['참치마요주먹밥', 'food', 2],
-     ['짜장범벅', 'food', 3], ['육개장', 'food', 4],
-     ['세트메뉴(주먹밥2+컵라면1)', 'food', 5]].forEach(([n, t, o]) => seed.run(n, t, o));
+    [['아이스티', 'cafe', 2000, 1], ['아이스커피', 'cafe', 2000, 2],
+     ['매실차', 'cafe', 2000, 3], ['생과일바나나주스', 'cafe', 3000, 4]].forEach(([n, t, p, o]) => seed.run(n, t, p, o));
+    [['멸치주먹밥', 'food', 2000, 1], ['참치마요주먹밥', 'food', 2000, 2],
+     ['짜장범벅', 'food', 2000, 3], ['육개장', 'food', 2000, 4],
+     ['세트메뉴(주먹밥2+컵라면1)', 'food', 5000, 5]].forEach(([n, t, p, o]) => seed.run(n, t, p, o));
   });
   seedAll();
 }
@@ -162,14 +167,14 @@ export function updateOrder(id: number, action: string): boolean {
 
 export function getMenuItems(): MenuItem[] {
   return (db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as Array<{
-    id: number; name: string; type: 'cafe' | 'food'; sort_order: number;
-  }>).map((r) => ({ id: r.id, name: r.name, type: r.type, sortOrder: r.sort_order }));
+    id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number;
+  }>).map((r) => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order }));
 }
 
-export function addMenuItem(name: string, type: 'cafe' | 'food'): MenuItem {
+export function addMenuItem(name: string, type: 'cafe' | 'food', price: number): MenuItem {
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM menu_items WHERE type = ?').get(type) as { next: number }).next;
-  const result = db.prepare('INSERT INTO menu_items (name, type, sort_order) VALUES (?, ?, ?)').run(name, type, maxOrder);
-  return { id: Number(result.lastInsertRowid), name, type, sortOrder: maxOrder };
+  const result = db.prepare('INSERT INTO menu_items (name, type, price, sort_order) VALUES (?, ?, ?, ?)').run(name, type, price, maxOrder);
+  return { id: Number(result.lastInsertRowid), name, type, price, sortOrder: maxOrder };
 }
 
 export function deleteMenuItem(id: number): boolean {

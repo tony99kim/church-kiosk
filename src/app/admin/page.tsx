@@ -14,6 +14,7 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'cafe' | 'food'>('cafe');
+  const [newPrice, setNewPrice] = useState('');
 
   const loadMenus = useCallback(() =>
     fetch('/api/menu').then((r) => r.json()).then(setMenus), []);
@@ -29,9 +30,10 @@ export default function AdminPage() {
     await fetch('/api/menu', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName.trim(), type: newType }),
+      body: JSON.stringify({ name: newName.trim(), type: newType, price: Number(newPrice) || 0 }),
     });
     setNewName('');
+    setNewPrice('');
     loadMenus();
   };
 
@@ -72,7 +74,7 @@ export default function AdminPage() {
           {/* 추가 */}
           <div className="bg-white rounded-2xl p-5 shadow mb-6">
             <h2 className="text-xl font-bold mb-4">메뉴 추가</h2>
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-wrap">
               <select value={newType} onChange={(e) => setNewType(e.target.value as 'cafe' | 'food')}
                 className="border rounded-xl px-4 py-3 text-lg">
                 <option value="cafe">☕ 카페</option>
@@ -80,7 +82,11 @@ export default function AdminPage() {
               </select>
               <input value={newName} onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addMenu()}
-                placeholder="메뉴 이름" className="flex-1 border rounded-xl px-4 py-3 text-lg" />
+                placeholder="메뉴 이름" className="flex-1 border rounded-xl px-4 py-3 text-lg min-w-32" />
+              <input value={newPrice} onChange={(e) => setNewPrice(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addMenu()}
+                placeholder="가격 (원)" type="number" min="0" step="100"
+                className="w-36 border rounded-xl px-4 py-3 text-lg" />
               <button onClick={addMenu}
                 className="bg-blue-500 text-white px-6 py-3 rounded-xl text-lg font-bold active:bg-blue-600">
                 추가
@@ -96,7 +102,10 @@ export default function AdminPage() {
                 <div className="space-y-2">
                   {items.map((item) => (
                     <div key={item.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                      <span className="text-base">{item.name}</span>
+                      <div>
+                        <p className="text-base">{item.name}</p>
+                        <p className="text-sm text-gray-400">{item.price.toLocaleString('ko-KR')}원</p>
+                      </div>
                       <button onClick={() => deleteMenu(item.id)}
                         className="text-red-400 hover:text-red-600 text-xl font-bold px-2">×</button>
                     </div>
