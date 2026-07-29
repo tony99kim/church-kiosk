@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import type { MenuItem } from '@/lib/store';
 
-const SET_MENU = '세트메뉴(주먹밥2+컵라면1)';
 const RICEBALL_OPTS = ['멸치주먹밥', '참치마요주먹밥'];
 const RAMEN_OPTS = ['짜장컵라면', '육개장컵라면'];
 
@@ -17,6 +16,7 @@ export default function KioskPage() {
   const [totalPaid, setTotalPaid] = useState(0);
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState(false);
+  const [modalItemName, setModalItemName] = useState('');
   const [setOpts, setSetOpts] = useState({ rb1: RICEBALL_OPTS[0], rb2: RICEBALL_OPTS[1], ramen: RAMEN_OPTS[0] });
 
   useEffect(() => { fetch('/api/menu').then(r => r.json()).then(setMenus); }, []);
@@ -31,23 +31,25 @@ export default function KioskPage() {
     return sum + item.price * qty;
   }, 0);
 
-  const adjustCafe = (name: string, delta: number) =>
-    setCafe(p => ({ ...p, [name]: Math.max(0, (p[name] ?? 0) + delta) }));
+  const adjustCafe = (item: MenuItem, delta: number) =>
+    setCafe(p => ({ ...p, [item.name]: Math.max(0, (p[item.name] ?? 0) + delta) }));
 
-  const adjustFood = (name: string, delta: number) => {
-    if (name === SET_MENU && delta > 0 && (food[name] ?? 0) === 0) {
+  const adjustFood = (item: MenuItem, delta: number) => {
+    const { name, isSet } = item;
+    if (isSet && delta > 0 && (food[name] ?? 0) === 0) {
+      setModalItemName(name);
       setModal(true);
       return;
     }
-    if (name === SET_MENU && delta < 0 && (food[name] ?? 0) <= 1) {
-      setItemOptions(p => { const n = { ...p }; delete n[SET_MENU]; return n; });
+    if (isSet && delta < 0 && (food[name] ?? 0) <= 1) {
+      setItemOptions(p => { const n = { ...p }; delete n[name]; return n; });
     }
     setFood(p => ({ ...p, [name]: Math.max(0, (p[name] ?? 0) + delta) }));
   };
 
   const confirmSetMenu = () => {
-    setFood(p => ({ ...p, [SET_MENU]: (p[SET_MENU] ?? 0) + 1 }));
-    setItemOptions(p => ({ ...p, [SET_MENU]: [setOpts.rb1, setOpts.rb2, setOpts.ramen] }));
+    setFood(p => ({ ...p, [modalItemName]: (p[modalItemName] ?? 0) + 1 }));
+    setItemOptions(p => ({ ...p, [modalItemName]: [setOpts.rb1, setOpts.rb2, setOpts.ramen] }));
     setModal(false);
   };
 
@@ -95,33 +97,33 @@ export default function KioskPage() {
     title: string;
     items: MenuItem[];
     state: Record<string, number>;
-    onAdjust: (name: string, delta: number) => void;
+    onAdjust: (item: MenuItem, delta: number) => void;
     color: 'amber' | 'green';
   }) => (
-    <div className={`flex-1 flex flex-col border-r border-gray-200 last:border-r-0`}>
+    <div className="flex-1 flex flex-col border-r border-gray-200 last:border-r-0">
       <div className={`py-3 text-center font-bold text-xl text-white ${color === 'amber' ? 'bg-amber-500' : 'bg-green-600'}`}>
         {title}
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50">
         {items.map(item => {
           const qty = st[item.name] ?? 0;
-          const isSet = item.name === SET_MENU;
-          const opts = isSet && itemOptions[SET_MENU];
+          const opts = item.isSet ? itemOptions[item.name] : null;
           return (
             <div key={item.id} className="bg-white rounded-xl px-4 py-3 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="text-lg font-medium leading-tight">{item.name}</p>
-                  {opts && (
-                    <p className="text-xs text-blue-500 mt-0.5">{opts.join(' + ')}</p>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <p className="text-lg font-medium leading-tight">{item.name}</p>
+                    {item.isSet && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">세트</span>}
+                  </div>
+                  {opts && <p className="text-xs text-blue-500 mt-0.5">{opts.join(' + ')}</p>}
                   <p className="text-sm text-gray-400 font-medium">{won(item.price)}</p>
                 </div>
                 <div className="flex items-center gap-3 ml-3">
-                  <button onClick={() => onAdjust(item.name, -1)}
+                  <button onClick={() => onAdjust(item, -1)}
                     className="w-10 h-10 rounded-full bg-gray-100 text-2xl font-bold flex items-center justify-center active:bg-gray-200">−</button>
                   <span className="text-2xl font-bold w-6 text-center">{qty}</span>
-                  <button onClick={() => onAdjust(item.name, 1)}
+                  <button onClick={() => onAdjust(item, 1)}
                     className={`w-10 h-10 rounded-full text-white text-2xl font-bold flex items-center justify-center ${color === 'amber' ? 'bg-amber-500 active:bg-amber-600' : 'bg-green-500 active:bg-green-600'}`}>+</button>
                 </div>
               </div>

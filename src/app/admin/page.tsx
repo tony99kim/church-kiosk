@@ -15,6 +15,7 @@ export default function AdminPage() {
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<'cafe' | 'food'>('cafe');
   const [newPrice, setNewPrice] = useState('');
+  const [newIsSet, setNewIsSet] = useState(false);
 
   const loadMenus = useCallback(() =>
     fetch('/api/menu').then((r) => r.json()).then(setMenus), []);
@@ -30,10 +31,11 @@ export default function AdminPage() {
     await fetch('/api/menu', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName.trim(), type: newType, price: Number(newPrice) || 0 }),
+      body: JSON.stringify({ name: newName.trim(), type: newType, price: Number(newPrice) || 0, isSet: newIsSet }),
     });
     setNewName('');
     setNewPrice('');
+    setNewIsSet(false);
     loadMenus();
   };
 
@@ -92,6 +94,13 @@ export default function AdminPage() {
                 추가
               </button>
             </div>
+            {newType === 'food' && (
+              <label className="flex items-center gap-2 mt-3 cursor-pointer w-fit">
+                <input type="checkbox" checked={newIsSet} onChange={e => setNewIsSet(e.target.checked)}
+                  className="w-5 h-5 accent-blue-500" />
+                <span className="text-base text-gray-700">세트메뉴 (주문 시 옵션 선택)</span>
+              </label>
+            )}
           </div>
 
           {/* 목록 */}
@@ -103,7 +112,12 @@ export default function AdminPage() {
                   {items.map((item) => (
                     <div key={item.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
                       <div>
-                        <p className="text-base">{item.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-base">{item.name}</p>
+                          {item.isSet && (
+                            <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium">세트</span>
+                          )}
+                        </div>
                         <p className="text-sm text-gray-400">{item.price.toLocaleString('ko-KR')}원</p>
                       </div>
                       <button onClick={() => deleteMenu(item.id)}

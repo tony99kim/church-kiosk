@@ -21,6 +21,7 @@ export interface MenuItem {
   type: 'cafe' | 'food';
   price: number;
   sortOrder: number;
+  isSet: boolean;
 }
 
 type SendFn = (data: string) => void;
@@ -64,22 +65,29 @@ db.exec(`
 
 try { db.exec("ALTER TABLE orders ADD COLUMN item_options TEXT NOT NULL DEFAULT '{}'"); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
+try { db.exec('ALTER TABLE menu_items ADD COLUMN is_set INTEGER NOT NULL DEFAULT 0'); } catch {}
 
+// [name, type, price, sort_order, is_set]
 const SEED_ITEMS = [
-  ['아이스티', 'cafe', 2000, 1], ['아이스커피', 'cafe', 2000, 2],
-  ['매실차', 'cafe', 2000, 3], ['생과일바나나주스', 'cafe', 3000, 4],
-  ['멸치주먹밥', 'food', 2000, 1], ['참치마요주먹밥', 'food', 2000, 2],
-  ['짜장범벅', 'food', 2000, 3], ['육개장', 'food', 2000, 4],
-  ['세트메뉴(주먹밥2+컵라면1)', 'food', 5000, 5],
+  ['아이스티', 'cafe', 2000, 1, 0], ['아이스커피', 'cafe', 2000, 2, 0],
+  ['매실차', 'cafe', 2000, 3, 0], ['생과일바나나주스', 'cafe', 3000, 4, 0],
+  ['멸치주먹밥', 'food', 2000, 1, 0], ['참치마요주먹밥', 'food', 2000, 2, 0],
+  ['짜장범벅', 'food', 2000, 3, 0], ['육개장', 'food', 2000, 4, 0],
+  ['세트메뉴(주먹밥2+컵라면1)', 'food', 5000, 5, 1],
 ] as const;
 
 const menuCount = (db.prepare('SELECT COUNT(*) as c FROM menu_items').get() as { c: number }).c;
 if (menuCount === 0) {
-  const seed = db.prepare('INSERT INTO menu_items (name, type, price, sort_order) VALUES (?, ?, ?, ?)');
-  db.transaction(() => { SEED_ITEMS.forEach(([n, t, p, o]) => seed.run(n, t, p, o)); })();
+  const seed = db.prepare('INSERT INTO menu_items (name, type, price, sort_order, is_set) VALUES (?, ?, ?, ?, ?)');
+  db.transaction(() => { SEED_ITEMS.forEach(([n, t, p, o, s]) => seed.run(n, t, p, o, s)); })();
 } else {
-  const up = db.prepare('UPDATE menu_items SET price = ? WHERE name = ? AND price = 0');
-  db.transaction(() => { SEED_ITEMS.forEach(([n, , p]) => up.run(p, n)); })();
+  // 기존 항목 가격 0이면 업데이트, 세트메뉴 is_set 마이그레이션
+  const upPrice = db.prepare('UPDATE menu_items SET price = ? WHERE name = ? AND price = 0');
+  const upSet = db.prepare('UPDATE menu_items SET is_set = 1 WHERE name = ? AND is_set = 0');
+  db.transaction(() => {
+    SEED_ITEMS.forEach(([n, , p]) => upPrice.run(p, n));
+    upSet.run('세트메뉴(주먹밥2+컵라면1)');
+  })();
 }
 
 type DbRow = {
@@ -228,14 +236,14 @@ export function updateOrder(id: number, action: string): boolean {
 
 export function getMenuItems(): MenuItem[] {
   return (db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as Array<{
-    id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number;
-  }>).map(r => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order }));
+    id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number; is_set: number;
+  }>).map(r => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order, isSet: r.is_set === 1 }));
 }
 
-export function addMenuItem(name: string, type: 'cafe' | 'food', price: number): MenuItem {
+export function addMenuItem(name: string, type: 'cafe' | 'food', price: number, isSet = false): MenuItem {
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM menu_items WHERE type = ?').get(type) as { next: number }).next;
-  const result = db.prepare('INSERT INTO menu_items (name, type, price, sort_order) VALUES (?, ?, ?, ?)').run(name, type, price, maxOrder);
-  return { id: Number(result.lastInsertRowid), name, type, price, sortOrder: maxOrder };
+  const result = db.prepare('INSERT INTO menu_items (name, type, price, sort_order, is_set) VALUES (?, ?, ?, ?, ?)').run(name, type, price, maxOrder, isSet ? 1 : 0);
+  return { id: Number(result.lastInsertRowid), name, type, price, sortOrder: maxOrder, isSet };
 }
 
 export function deleteMenuItem(id: number): boolean {

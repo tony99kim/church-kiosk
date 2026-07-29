@@ -6,10 +6,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, type, price } = await req.json();
+  const { name, type, price, isSet } = await req.json();
   if (!name || !['cafe', 'food'].includes(type)) {
     return NextResponse.json({ error: 'invalid' }, { status: 400 });
   }
-  const item = addMenuItem(String(name).trim(), type, Number(price) || 0);
+  const item = addMenuItem(String(name).trim(), type, Number(price) || 0, Boolean(isSet));
   return NextResponse.json(item);
 }
