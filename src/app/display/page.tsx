@@ -2,70 +2,44 @@
 import { useOrders } from '@/lib/useOrders';
 import type { Order } from '@/lib/store';
 
-function NumberBox({ id, isReady }: { id: number; isReady: boolean }) {
+function NumberChip({ id, pulse }: { id: number; pulse?: boolean }) {
   return (
-    <div
-      className={`rounded-2xl flex items-center justify-center w-32 h-32 text-5xl font-black select-none ${
-        isReady
-          ? 'bg-green-400 text-white shadow-lg animate-pulse'
-          : 'bg-amber-300 text-amber-900'
-      }`}
-    >
+    <div className={`w-24 h-24 rounded-2xl flex items-center justify-center text-4xl font-black select-none ${
+      pulse ? 'bg-green-400 text-white animate-pulse shadow-lg shadow-green-500/50' : 'bg-amber-400 text-amber-900'
+    }`}>
       {id}
     </div>
   );
 }
 
-function Side({
-  label,
-  orders,
-  statusKey,
-  headerClass,
+function Column({
+  label, orders, statusKey, isReady, accent,
 }: {
   label: string;
   orders: Order[];
   statusKey: 'cafeStatus' | 'foodStatus';
-  headerClass: string;
+  isReady: boolean;
+  accent: string;
 }) {
-  const visible = orders.filter(
-    (o) => o[statusKey] === 'preparing' || o[statusKey] === 'ready'
-  );
-  const ready = visible.filter((o) => o[statusKey] === 'ready');
-  const preparing = visible.filter((o) => o[statusKey] === 'preparing');
+  const filtered = orders.filter(o => o[statusKey] === (isReady ? 'ready' : 'preparing'));
 
   return (
-    <div className="flex-1 flex flex-col">
-      <div className={`${headerClass} py-7 text-center`}>
-        <h2 className="text-5xl font-bold text-white">{label}</h2>
+    <div className="flex-1 flex flex-col min-w-0">
+      <div className={`py-3 text-center ${accent} border-b border-gray-700`}>
+        <p className={`text-lg font-bold ${isReady ? 'text-green-400' : 'text-amber-400'}`}>
+          {isReady ? '✅ 가져가세요' : '⏳ 준비중'}
+        </p>
+        <p className="text-gray-400 text-sm">{filtered.length}건</p>
       </div>
-
-      {ready.length > 0 && (
-        <div className="p-6 bg-green-900/20 border-b border-gray-700">
-          <p className="text-green-400 text-2xl font-bold text-center mb-5">✅ 가져가세요</p>
-          <div className="flex flex-wrap gap-4 justify-center">
-            {ready.map((o) => (
-              <NumberBox key={o.id} id={o.id} isReady={true} />
-            ))}
+      <div className="flex-1 p-4 flex flex-wrap gap-3 content-start overflow-hidden">
+        {filtered.length === 0 ? (
+          <div className="w-full flex items-center justify-center text-gray-700 text-xl py-8">
+            없음
           </div>
-        </div>
-      )}
-
-      {preparing.length > 0 && (
-        <div className="p-6">
-          <p className="text-amber-400 text-2xl font-bold text-center mb-5">⏳ 준비중</p>
-          <div className="flex flex-wrap gap-4 justify-center">
-            {preparing.map((o) => (
-              <NumberBox key={o.id} id={o.id} isReady={false} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {visible.length === 0 && (
-        <div className="flex-1 flex items-center justify-center text-gray-600 text-3xl">
-          대기 없음
-        </div>
-      )}
+        ) : (
+          filtered.map(o => <NumberChip key={o.id} id={o.id} pulse={isReady} />)
+        )}
+      </div>
     </div>
   );
 }
@@ -74,20 +48,33 @@ export default function DisplayPage() {
   const orders = useOrders();
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex">
-      <Side
-        label="☕ 카페"
-        orders={orders}
-        statusKey="cafeStatus"
-        headerClass="bg-amber-600"
-      />
-      <div className="w-px bg-gray-700" />
-      <Side
-        label="🍱 음식점"
-        orders={orders}
-        statusKey="foodStatus"
-        headerClass="bg-green-700"
-      />
+    <div className="h-screen bg-gray-900 text-white flex overflow-hidden">
+      {/* 카페 반쪽 */}
+      <div className="flex-1 flex flex-col min-w-0 border-r-4 border-gray-600">
+        <div className="bg-amber-600 py-4 text-center shrink-0">
+          <h2 className="text-4xl font-bold">☕ 카페</h2>
+        </div>
+        <div className="flex-1 flex min-h-0">
+          <Column label="준비중" orders={orders} statusKey="cafeStatus" isReady={false} accent="bg-gray-800" />
+          <div className="w-px bg-gray-700" />
+          <Column label="가져가세요" orders={orders} statusKey="cafeStatus" isReady={true} accent="bg-gray-800" />
+        </div>
+      </div>
+
+      {/* 구분선 */}
+      <div className="w-2 bg-gray-600 shrink-0" />
+
+      {/* 음식 반쪽 */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="bg-green-700 py-4 text-center shrink-0">
+          <h2 className="text-4xl font-bold">🍱 음식점</h2>
+        </div>
+        <div className="flex-1 flex min-h-0">
+          <Column label="준비중" orders={orders} statusKey="foodStatus" isReady={false} accent="bg-gray-800" />
+          <div className="w-px bg-gray-700" />
+          <Column label="가져가세요" orders={orders} statusKey="foodStatus" isReady={true} accent="bg-gray-800" />
+        </div>
+      </div>
     </div>
   );
 }
