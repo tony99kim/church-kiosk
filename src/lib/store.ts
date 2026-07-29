@@ -12,6 +12,13 @@ export interface Order {
   createdAt: number;
 }
 
+export interface MenuItem {
+  id: number;
+  name: string;
+  type: 'cafe' | 'food';
+  sortOrder: number;
+}
+
 type SendFn = (data: string) => void;
 
 interface KioskState {
@@ -25,7 +32,6 @@ declare global {
   var _kioskState: KioskState | undefined;
 }
 
-// DB is module-level — SQLite handles concurrent access fine
 const db = new Database(
   process.env.DB_PATH ?? path.join(process.cwd(), 'kiosk.db')
 );
@@ -38,8 +44,28 @@ db.exec(`
     cafe_status TEXT    NOT NULL,
     food_status TEXT    NOT NULL,
     created_at  INTEGER NOT NULL
-  )
+  );
+
+  CREATE TABLE IF NOT EXISTS menu_items (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    type       TEXT    NOT NULL CHECK(type IN ('cafe','food')),
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
 `);
+
+// 최초 실행 시 기본 메뉴 시딩
+const menuCount = (db.prepare('SELECT COUNT(*) as c FROM menu_items').get() as { c: number }).c;
+if (menuCount === 0) {
+  const seed = db.prepare('INSERT INTO menu_items (name, type, sort_order) VALUES (?, ?, ?)');
+  const seedAll = db.transaction(() => {
+    [['아메리카노', 'cafe', 1], ['카페라떼', 'cafe', 2], ['녹차라떼', 'cafe', 3],
+     ['유자차', 'cafe', 4], ['레몬에이드', 'cafe', 5]].forEach(([n, t, o]) => seed.run(n, t, o));
+    [['비빔밥', 'food', 1], ['잡채', 'food', 2], ['불고기', 'food', 3],
+     ['김치볶음밥', 'food', 4], ['순두부찌개', 'food', 5]].forEach(([n, t, o]) => seed.run(n, t, o));
+  });
+  seedAll();
+}
 
 const stmtInsert = db.prepare(
   'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at) VALUES (?, ?, ?, ?, ?, ?)'
@@ -49,12 +75,8 @@ const stmtUpdate = db.prepare(
 );
 
 type DbRow = {
-  id: number;
-  cafe_items: string;
-  food_items: string;
-  cafe_status: Status;
-  food_status: Status;
-  created_at: number;
+  id: number; cafe_items: string; food_items: string;
+  cafe_status: Status; food_status: Status; created_at: number;
 };
 
 function loadFromDb(): Map<number, Order> {
@@ -74,13 +96,10 @@ function loadFromDb(): Map<number, Order> {
 }
 
 function getNextId(): number {
-  const row = db
-    .prepare('SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM orders')
-    .get() as { next_id: number };
+  const row = db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM orders').get() as { next_id: number };
   return row.next_id;
 }
 
-// Keep in-memory state across hot reloads in dev
 const state: KioskState =
   globalThis._kioskState ??
   (globalThis._kioskState = {
@@ -95,18 +114,11 @@ export function getOrders(): Order[] {
 
 function broadcast() {
   const data = JSON.stringify(getOrders());
-  state.clients.forEach((fn) => {
-    try { fn(data); } catch {}
-  });
+  state.clients.forEach((fn) => { try { fn(data); } catch {} });
 }
 
-export function addClient(fn: SendFn) {
-  state.clients.add(fn);
-}
-
-export function removeClient(fn: SendFn) {
-  state.clients.delete(fn);
-}
+export function addClient(fn: SendFn) { state.clients.add(fn); }
+export function removeClient(fn: SendFn) { state.clients.delete(fn); }
 
 export function createOrder(
   cafeItems: Record<string, number>,
@@ -123,12 +135,8 @@ export function createOrder(
     createdAt: Date.now(),
   };
   stmtInsert.run(
-    order.id,
-    JSON.stringify(order.cafeItems),
-    JSON.stringify(order.foodItems),
-    order.cafeStatus,
-    order.foodStatus,
-    order.createdAt
+    order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
+    order.cafeStatus, order.foodStatus, order.createdAt
   );
   state.orders.set(order.id, order);
   broadcast();
@@ -147,4 +155,53 @@ export function updateOrder(id: number, action: string): boolean {
   stmtUpdate.run(order.cafeStatus, order.foodStatus, order.id);
   broadcast();
   return true;
+}
+
+// ── 메뉴 관리 ──────────────────────────────────────────────
+
+export function getMenuItems(): MenuItem[] {
+  return (db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as Array<{
+    id: number; name: string; type: 'cafe' | 'food'; sort_order: number;
+  }>).map((r) => ({ id: r.id, name: r.name, type: r.type, sortOrder: r.sort_order }));
+}
+
+export function addMenuItem(name: string, type: 'cafe' | 'food'): MenuItem {
+  const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM menu_items WHERE type = ?').get(type) as { next: number }).next;
+  const result = db.prepare('INSERT INTO menu_items (name, type, sort_order) VALUES (?, ?, ?)').run(name, type, maxOrder);
+  return { id: Number(result.lastInsertRowid), name, type, sortOrder: maxOrder };
+}
+
+export function deleteMenuItem(id: number): boolean {
+  const result = db.prepare('DELETE FROM menu_items WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// ── 판매 통계 ──────────────────────────────────────────────
+
+export function getStats() {
+  const rows = db.prepare('SELECT cafe_items, food_items, created_at FROM orders').all() as Array<{
+    cafe_items: string; food_items: string; created_at: number;
+  }>;
+  const cafeItems: Record<string, number> = {};
+  const foodItems: Record<string, number> = {};
+
+  for (const row of rows) {
+    for (const [name, qty] of Object.entries(JSON.parse(row.cafe_items) as Record<string, number>)) {
+      if (qty > 0) cafeItems[name] = (cafeItems[name] ?? 0) + qty;
+    }
+    for (const [name, qty] of Object.entries(JSON.parse(row.food_items) as Record<string, number>)) {
+      if (qty > 0) foodItems[name] = (foodItems[name] ?? 0) + qty;
+    }
+  }
+
+  return { totalOrders: rows.length, cafeItems, foodItems };
+}
+
+// ── 주문 초기화 ────────────────────────────────────────────
+
+export function resetOrders(): void {
+  db.prepare('DELETE FROM orders').run();
+  state.orders.clear();
+  state.nextId = 1;
+  broadcast();
 }
