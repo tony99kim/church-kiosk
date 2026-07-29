@@ -59,18 +59,23 @@ db.exec(`
 // 기존 EC2 DB에 price 컬럼 없으면 추가 (마이그레이션)
 try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
 
+const SEED_ITEMS = [
+  ['아이스티', 'cafe', 2000, 1], ['아이스커피', 'cafe', 2000, 2],
+  ['매실차', 'cafe', 2000, 3], ['생과일바나나주스', 'cafe', 3000, 4],
+  ['멸치주먹밥', 'food', 2000, 1], ['참치마요주먹밥', 'food', 2000, 2],
+  ['짜장범벅', 'food', 2000, 3], ['육개장', 'food', 2000, 4],
+  ['세트메뉴(주먹밥2+컵라면1)', 'food', 5000, 5],
+] as const;
+
 // 최초 실행 시 기본 메뉴 시딩
 const menuCount = (db.prepare('SELECT COUNT(*) as c FROM menu_items').get() as { c: number }).c;
 if (menuCount === 0) {
   const seed = db.prepare('INSERT INTO menu_items (name, type, price, sort_order) VALUES (?, ?, ?, ?)');
-  const seedAll = db.transaction(() => {
-    [['아이스티', 'cafe', 2000, 1], ['아이스커피', 'cafe', 2000, 2],
-     ['매실차', 'cafe', 2000, 3], ['생과일바나나주스', 'cafe', 3000, 4]].forEach(([n, t, p, o]) => seed.run(n, t, p, o));
-    [['멸치주먹밥', 'food', 2000, 1], ['참치마요주먹밥', 'food', 2000, 2],
-     ['짜장범벅', 'food', 2000, 3], ['육개장', 'food', 2000, 4],
-     ['세트메뉴(주먹밥2+컵라면1)', 'food', 5000, 5]].forEach(([n, t, p, o]) => seed.run(n, t, p, o));
-  });
-  seedAll();
+  db.transaction(() => { SEED_ITEMS.forEach(([n, t, p, o]) => seed.run(n, t, p, o)); })();
+} else {
+  // 기존 DB 가격이 0인 항목 업데이트 (가격 기능 추가 후 마이그레이션)
+  const updatePrice = db.prepare('UPDATE menu_items SET price = ? WHERE name = ? AND price = 0');
+  db.transaction(() => { SEED_ITEMS.forEach(([n, , p]) => updatePrice.run(p, n)); })();
 }
 
 const stmtInsert = db.prepare(
