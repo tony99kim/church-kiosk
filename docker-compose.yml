@@ -1,0 +1,13 @@
+services:
+  kiosk:
+    image: ghcr.io/${GITHUB_USERNAME}/church-kiosk:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - kiosk-data:/data
+    environment:
+      - DB_PATH=/data/kiosk.db
+    restart: always
+
+volumes:
+  kiosk-data:
