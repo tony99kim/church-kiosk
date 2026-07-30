@@ -209,8 +209,8 @@ function initSlots(orders: Map<number, Order>) {
   const food:   (number | null)[] = Array(10).fill(null);
   const cafePU: (number | null)[] = Array(10).fill(null);
   const foodPU: (number | null)[] = Array(10).fill(null);
-  Array.from(orders.values()).filter(o => o.cafeStatus === 'preparing').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafe[i]   = o.id; o.cafeSlot        = i + 1; });
-  Array.from(orders.values()).filter(o => o.foodStatus === 'preparing').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { food[i]   = o.id; o.foodSlot        = i + 1; });
+  Array.from(orders.values()).filter(o => o.cafeStatus === 'preparing' || o.cafeStatus === 'ready').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafe[i]   = o.id; o.cafeSlot        = i + 1; });
+  Array.from(orders.values()).filter(o => o.foodStatus === 'preparing' || o.foodStatus === 'ready').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { food[i]   = o.id; o.foodSlot        = i + 1; });
   Array.from(orders.values()).filter(o => o.cafeStatus === 'preparing' || o.cafeStatus === 'ready').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafePU[i] = o.id; o.cafePickupSlot  = i + 1; });
   Array.from(orders.values()).filter(o => o.foodStatus === 'preparing' || o.foodStatus === 'ready').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { foodPU[i] = o.id; o.foodPickupSlot  = i + 1; });
   return { cafe, food, cafePU, foodPU };
@@ -313,27 +313,28 @@ export function updateOrder(id: number, action: string): boolean {
     'cafe-ready': () => {
       if (order.cafeStatus === 'preparing') {
         order.cafeStatus = 'ready';
-        freeAndReassign(state.cafeSlots, order, 'cafeSlot', 'cafeStatus');
-        // 수령대 슬롯은 주문 시 이미 배정됨 — 오버플로우였던 경우만 배정
+        // cafeSlot 유지 — 수령완료 시까지 준비대 자리 점유
         if (!order.cafePickupSlot) assignSlot(state.cafePickupSlots, order, 'cafePickupSlot');
       }
     },
     'food-ready': () => {
       if (order.foodStatus === 'preparing') {
         order.foodStatus = 'ready';
-        freeAndReassign(state.foodSlots, order, 'foodSlot', 'foodStatus');
+        // foodSlot 유지 — 수령완료 시까지 준비대 자리 점유
         if (!order.foodPickupSlot) assignSlot(state.foodPickupSlots, order, 'foodPickupSlot');
       }
     },
     'cafe-pickup': () => {
       if (order.cafeStatus === 'ready') {
         order.cafeStatus = 'picked';
+        freeAndReassign(state.cafeSlots, order, 'cafeSlot', 'cafeStatus');
         freePickupAndReassign(state.cafePickupSlots, order, 'cafePickupSlot', 'cafeStatus');
       }
     },
     'food-pickup': () => {
       if (order.foodStatus === 'ready') {
         order.foodStatus = 'picked';
+        freeAndReassign(state.foodSlots, order, 'foodSlot', 'foodStatus');
         freePickupAndReassign(state.foodPickupSlots, order, 'foodPickupSlot', 'foodStatus');
       }
     },
