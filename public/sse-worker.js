@@ -12,7 +12,12 @@ function connect() {
     }
     dead.forEach(p => ports.delete(p));
   };
-  es.onerror = () => { es.close(); es = null; setTimeout(connect, 2000); };
+  es.onerror = () => {
+    es.close();
+    es = null;
+    // 포트가 없어도 일정 시간 후 재연결 유지 (탭이 늦게 붙는 경우 대비)
+    setTimeout(connect, 2000);
+  };
 }
 
 self.onconnect = (e) => {
@@ -21,4 +26,8 @@ self.onconnect = (e) => {
   port.start();
   if (lastData) port.postMessage(lastData);
   if (!es) connect();
+  port.onmessageerror = () => ports.delete(port);
 };
+
+// 워커가 처음 로드될 때 바로 연결 시작
+connect();

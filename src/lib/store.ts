@@ -186,10 +186,15 @@ function loadFromDb(): Map<number, Order> {
       }
     } catch { /* ignore */ }
 
+    let cafeItems: Record<string, number> = {};
+    let foodItems: Record<string, number> = {};
+    try { cafeItems = JSON.parse(r.cafe_items); } catch {}
+    try { foodItems = JSON.parse(r.food_items); } catch {}
+
     map.set(r.id, {
       id: r.id,
-      cafeItems: JSON.parse(r.cafe_items),
-      foodItems: JSON.parse(r.food_items),
+      cafeItems,
+      foodItems,
       cafeStatus: r.cafe_status,
       foodStatus: r.food_status,
       createdAt: r.created_at,
@@ -309,18 +314,20 @@ export function createOrder(
 export function updateOrder(id: number, action: string): boolean {
   const order = state.orders.get(id);
   if (!order) return false;
+
+  const prevCafe = order.cafeStatus;
+  const prevFood = order.foodStatus;
+
   ({
     'cafe-ready': () => {
       if (order.cafeStatus === 'preparing') {
         order.cafeStatus = 'ready';
-        // cafeSlot 유지 — 수령완료 시까지 준비대 자리 점유
         if (!order.cafePickupSlot) assignSlot(state.cafePickupSlots, order, 'cafePickupSlot');
       }
     },
     'food-ready': () => {
       if (order.foodStatus === 'preparing') {
         order.foodStatus = 'ready';
-        // foodSlot 유지 — 수령완료 시까지 준비대 자리 점유
         if (!order.foodPickupSlot) assignSlot(state.foodPickupSlots, order, 'foodPickupSlot');
       }
     },
@@ -339,7 +346,17 @@ export function updateOrder(id: number, action: string): boolean {
       }
     },
   } as Record<string, () => void>)[action]?.();
-  stmtUpdate.run(order.cafeStatus, order.foodStatus, order.id);
+
+  try {
+    stmtUpdate.run(order.cafeStatus, order.foodStatus, order.id);
+  } catch (e) {
+    // DB 실패 시 메모리 상태 롤백
+    order.cafeStatus = prevCafe;
+    order.foodStatus = prevFood;
+    console.error('updateOrder DB error:', e);
+    return false;
+  }
+
   broadcast();
   return true;
 }
@@ -390,10 +407,14 @@ export function getStats() {
   const cafeItems: Record<string, number> = {};
   const foodItems: Record<string, number> = {};
   for (const row of rows) {
-    for (const [n, q] of Object.entries(JSON.parse(row.cafe_items) as Record<string, number>))
-      if (q > 0) cafeItems[n] = (cafeItems[n] ?? 0) + q;
-    for (const [n, q] of Object.entries(JSON.parse(row.food_items) as Record<string, number>))
-      if (q > 0) foodItems[n] = (foodItems[n] ?? 0) + q;
+    try {
+      for (const [n, q] of Object.entries(JSON.parse(row.cafe_items) as Record<string, number>))
+        if (q > 0) cafeItems[n] = (cafeItems[n] ?? 0) + q;
+    } catch {}
+    try {
+      for (const [n, q] of Object.entries(JSON.parse(row.food_items) as Record<string, number>))
+        if (q > 0) foodItems[n] = (foodItems[n] ?? 0) + q;
+    } catch {}
   }
   return { totalOrders: rows.length, cafeItems, foodItems };
 }
@@ -405,8 +426,10 @@ export function getOrdersForExport() {
   const rows = db.prepare('SELECT * FROM orders ORDER BY id').all() as DbRow[];
 
   return rows.map(r => {
-    const cafeItems = JSON.parse(r.cafe_items) as Record<string, number>;
-    const foodItems = JSON.parse(r.food_items) as Record<string, number>;
+    let cafeItems: Record<string, number> = {};
+    let foodItems: Record<string, number> = {};
+    try { cafeItems = JSON.parse(r.cafe_items); } catch {}
+    try { foodItems = JSON.parse(r.food_items); } catch {}
     let rawOpts: Record<string, unknown> = {};
     try { rawOpts = JSON.parse(r.item_options || '{}'); } catch { /* empty */ }
 

@@ -66,7 +66,10 @@ export default function KioskPage() {
   const [loading, setLoading]   = useState(false);
   const cartKeyRef = useRef(0);
 
-  useEffect(() => { fetch('/api/menu').then(r => r.json()).then(setMenus); }, []);
+  useEffect(() => {
+    const load = () => fetch('/api/menu').then(r => r.ok ? r.json() : Promise.reject(r.status)).then(setMenus).catch(() => setTimeout(load, 3000));
+    load();
+  }, []);
 
   const cafeMenu = menus.filter(m => m.type === 'cafe');
   const foodMenu = menus.filter(m => m.type === 'food');

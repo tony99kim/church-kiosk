@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const encoder = new TextEncoder();
   let send: ((data: string) => void) | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
 
   const stream = new ReadableStream({
     start(controller) {
@@ -15,8 +16,14 @@ export async function GET() {
       };
       addClient(send);
       send(JSON.stringify(getOrders()));
+
+      // nginx/ALB 기본 60초 idle timeout 방지 — 25초마다 ping
+      heartbeat = setInterval(() => {
+        try { controller.enqueue(encoder.encode(': ping\n\n')); } catch {}
+      }, 25_000);
     },
     cancel() {
+      clearInterval(heartbeat);
       if (send) removeClient(send);
     },
   });
