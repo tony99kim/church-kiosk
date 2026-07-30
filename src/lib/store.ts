@@ -3,16 +3,17 @@ import path from 'path';
 
 export type Status = 'none' | 'preparing' | 'ready' | 'picked';
 
-export interface Order {
+export interface OptionItem {
   id: number;
-  cafeItems: Record<string, number>;
-  foodItems: Record<string, number>;
-  cafeStatus: Status;
-  foodStatus: Status;
-  createdAt: number;
-  cafeSlot?: number;
-  foodSlot?: number;
-  itemOptions: Record<string, string[]>;
+  name: string;
+  price: number;
+}
+
+export interface OptionGroup {
+  id: number;
+  name: string;
+  required: boolean;
+  options: OptionItem[];
 }
 
 export interface MenuItem {
@@ -21,7 +22,22 @@ export interface MenuItem {
   type: 'cafe' | 'food';
   price: number;
   sortOrder: number;
-  isSet: boolean;
+  optionGroups: OptionGroup[];
+}
+
+export interface Order {
+  id: number;
+  cafeItems: Record<string, number>;
+  foodItems: Record<string, number>;
+  cafeStatus: Status;
+  foodStatus: Status;
+  createdAt: number;
+  cafeSlot?: number;        // 카페 준비대 (1-10)
+  foodSlot?: number;        // 음식 준비대 (1-10)
+  cafePickupSlot?: number;  // 카페 수령대 (1-10)
+  foodPickupSlot?: number;  // 음식 수령대 (1-10)
+  // groupName → selected option name (per menu item name)
+  itemOptions: Record<string, Record<string, string>>;
 }
 
 type SendFn = (data: string) => void;
@@ -32,6 +48,8 @@ interface KioskState {
   clients: Set<SendFn>;
   cafeSlots: (number | null)[];
   foodSlots: (number | null)[];
+  cafePickupSlots: (number | null)[];
+  foodPickupSlots: (number | null)[];
 }
 
 declare global {
@@ -59,6 +77,23 @@ db.exec(`
     name       TEXT    NOT NULL,
     type       TEXT    NOT NULL CHECK(type IN ('cafe','food')),
     price      INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_set     INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS option_groups (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    menu_item_id INTEGER NOT NULL,
+    name         TEXT    NOT NULL,
+    required     INTEGER NOT NULL DEFAULT 1,
+    sort_order   INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS option_items (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id   INTEGER NOT NULL,
+    name       TEXT    NOT NULL,
+    price      INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0
   );
 `);
@@ -67,12 +102,32 @@ try { db.exec("ALTER TABLE orders ADD COLUMN item_options TEXT NOT NULL DEFAULT 
 try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN is_set INTEGER NOT NULL DEFAULT 0'); } catch {}
 
-// [name, type, price, sort_order, is_set]
+// ── 메뉴 옵션 그룹 저장 (replace all) ────────────────────────
+export function saveMenuOptions(
+  menuItemId: number,
+  groups: Array<{ name: string; required: boolean; options: Array<{ name: string; price: number }> }>
+): void {
+  db.transaction(() => {
+    const gids = (db.prepare('SELECT id FROM option_groups WHERE menu_item_id = ?').all(menuItemId) as { id: number }[]).map(r => r.id);
+    for (const gid of gids) db.prepare('DELETE FROM option_items WHERE group_id = ?').run(gid);
+    db.prepare('DELETE FROM option_groups WHERE menu_item_id = ?').run(menuItemId);
+
+    const insGroup = db.prepare('INSERT INTO option_groups (menu_item_id, name, required, sort_order) VALUES (?, ?, ?, ?)');
+    const insItem  = db.prepare('INSERT INTO option_items  (group_id, name, price, sort_order) VALUES (?, ?, ?, ?)');
+
+    groups.forEach((g, gi) => {
+      const { lastInsertRowid: gid } = insGroup.run(menuItemId, g.name, g.required ? 1 : 0, gi);
+      g.options.forEach((o, oi) => insItem.run(gid, o.name, o.price, oi));
+    });
+  })();
+}
+
+// ── 시드 ────────────────────────────────────────────────────
 const SEED_ITEMS = [
   ['아이스티', 'cafe', 2000, 1, 0], ['아이스커피', 'cafe', 2000, 2, 0],
-  ['매실차', 'cafe', 2000, 3, 0], ['생과일바나나주스', 'cafe', 3000, 4, 0],
-  ['멸치주먹밥', 'food', 2000, 1, 0], ['참치마요주먹밥', 'food', 2000, 2, 0],
-  ['짜장범벅', 'food', 2000, 3, 0], ['육개장', 'food', 2000, 4, 0],
+  ['매실차', 'cafe', 2000, 3, 0],   ['생과일바나나주스', 'cafe', 3000, 4, 0],
+  ['멸치주먹밥', 'food', 2000, 1, 0],     ['참치마요주먹밥', 'food', 2000, 2, 0],
+  ['짜장범벅', 'food', 2000, 3, 0],       ['육개장', 'food', 2000, 4, 0],
   ['세트메뉴(주먹밥2+컵라면1)', 'food', 5000, 5, 1],
 ] as const;
 
@@ -81,15 +136,28 @@ if (menuCount === 0) {
   const seed = db.prepare('INSERT INTO menu_items (name, type, price, sort_order, is_set) VALUES (?, ?, ?, ?, ?)');
   db.transaction(() => { SEED_ITEMS.forEach(([n, t, p, o, s]) => seed.run(n, t, p, o, s)); })();
 } else {
-  // 기존 항목 가격 0이면 업데이트, 세트메뉴 is_set 마이그레이션
   const upPrice = db.prepare('UPDATE menu_items SET price = ? WHERE name = ? AND price = 0');
-  const upSet = db.prepare('UPDATE menu_items SET is_set = 1 WHERE name = ? AND is_set = 0');
+  const upSet   = db.prepare('UPDATE menu_items SET is_set = 1 WHERE name = ? AND is_set = 0');
   db.transaction(() => {
     SEED_ITEMS.forEach(([n, , p]) => upPrice.run(p, n));
     upSet.run('세트메뉴(주먹밥2+컵라면1)');
   })();
 }
 
+// 세트메뉴 옵션 그룹 초기 시딩
+const setMenuItem = db.prepare("SELECT id FROM menu_items WHERE name = '세트메뉴(주먹밥2+컵라면1)'").get() as { id: number } | undefined;
+if (setMenuItem) {
+  const gc = (db.prepare('SELECT COUNT(*) as c FROM option_groups WHERE menu_item_id = ?').get(setMenuItem.id) as { c: number }).c;
+  if (gc === 0) {
+    saveMenuOptions(setMenuItem.id, [
+      { name: '주먹밥 ①', required: true,  options: [{ name: '멸치주먹밥', price: 0 }, { name: '참치마요주먹밥', price: 0 }] },
+      { name: '주먹밥 ②', required: true,  options: [{ name: '멸치주먹밥', price: 0 }, { name: '참치마요주먹밥', price: 0 }] },
+      { name: '컵라면',   required: true,  options: [{ name: '짜장컵라면', price: 0 }, { name: '육개장컵라면', price: 0 }] },
+    ]);
+  }
+}
+
+// ── DB 로드 ─────────────────────────────────────────────────
 type DbRow = {
   id: number; cafe_items: string; food_items: string;
   cafe_status: Status; food_status: Status; created_at: number; item_options: string;
@@ -99,6 +167,16 @@ function loadFromDb(): Map<number, Order> {
   const rows = db.prepare('SELECT * FROM orders').all() as DbRow[];
   const map = new Map<number, Order>();
   for (const r of rows) {
+    let itemOptions: Record<string, Record<string, string>> = {};
+    try {
+      const raw = JSON.parse(r.item_options || '{}');
+      // 새 포맷(object)만 사용, 구 포맷(array)은 무시
+      for (const [k, v] of Object.entries(raw)) {
+        if (v && typeof v === 'object' && !Array.isArray(v))
+          itemOptions[k] = v as Record<string, string>;
+      }
+    } catch { /* ignore */ }
+
     map.set(r.id, {
       id: r.id,
       cafeItems: JSON.parse(r.cafe_items),
@@ -106,7 +184,7 @@ function loadFromDb(): Map<number, Order> {
       cafeStatus: r.cafe_status,
       foodStatus: r.food_status,
       createdAt: r.created_at,
-      itemOptions: JSON.parse(r.item_options || '{}'),
+      itemOptions,
     });
   }
   return map;
@@ -117,67 +195,59 @@ function getNextId(): number {
   return row.next_id;
 }
 
-function initSlots(orders: Map<number, Order>): { cafe: (number | null)[]; food: (number | null)[] } {
-  const cafe: (number | null)[] = Array(10).fill(null);
-  const food: (number | null)[] = Array(10).fill(null);
-
-  Array.from(orders.values())
-    .filter(o => o.cafeStatus === 'preparing')
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .slice(0, 10)
-    .forEach((o, i) => { cafe[i] = o.id; o.cafeSlot = i + 1; });
-
-  Array.from(orders.values())
-    .filter(o => o.foodStatus === 'preparing')
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .slice(0, 10)
-    .forEach((o, i) => { food[i] = o.id; o.foodSlot = i + 1; });
-
-  return { cafe, food };
+function initSlots(orders: Map<number, Order>) {
+  const cafe:   (number | null)[] = Array(10).fill(null);
+  const food:   (number | null)[] = Array(10).fill(null);
+  const cafePU: (number | null)[] = Array(10).fill(null);
+  const foodPU: (number | null)[] = Array(10).fill(null);
+  Array.from(orders.values()).filter(o => o.cafeStatus === 'preparing').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafe[i]   = o.id; o.cafeSlot        = i + 1; });
+  Array.from(orders.values()).filter(o => o.foodStatus === 'preparing').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { food[i]   = o.id; o.foodSlot        = i + 1; });
+  Array.from(orders.values()).filter(o => o.cafeStatus === 'ready').    sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafePU[i] = o.id; o.cafePickupSlot  = i + 1; });
+  Array.from(orders.values()).filter(o => o.foodStatus === 'ready').    sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { foodPU[i] = o.id; o.foodPickupSlot  = i + 1; });
+  return { cafe, food, cafePU, foodPU };
 }
 
 let state: KioskState;
 if (globalThis._kioskState) {
   state = globalThis._kioskState;
   if (!state.cafeSlots) {
-    const { cafe, food } = initSlots(state.orders);
-    (state as KioskState).cafeSlots = cafe;
-    (state as KioskState).foodSlots = food;
+    const { cafe, food, cafePU, foodPU } = initSlots(state.orders);
+    state.cafeSlots        = cafe;
+    state.foodSlots        = food;
+    state.cafePickupSlots  = cafePU;
+    state.foodPickupSlots  = foodPU;
+  }
+  if (!state.cafePickupSlots) {
+    const { cafePU, foodPU } = initSlots(state.orders);
+    state.cafePickupSlots = cafePU;
+    state.foodPickupSlots = foodPU;
   }
 } else {
   const orders = loadFromDb();
-  const { cafe, food } = initSlots(orders);
-  state = { orders, nextId: getNextId(), clients: new Set(), cafeSlots: cafe, foodSlots: food };
+  const { cafe, food, cafePU, foodPU } = initSlots(orders);
+  state = { orders, nextId: getNextId(), clients: new Set(), cafeSlots: cafe, foodSlots: food, cafePickupSlots: cafePU, foodPickupSlots: foodPU };
   globalThis._kioskState = state;
 }
 
-export function getOrders(): Order[] {
-  return Array.from(state.orders.values());
-}
+export function getOrders(): Order[] { return Array.from(state.orders.values()); }
 
 function broadcast() {
   const data = JSON.stringify(getOrders());
-  state.clients.forEach((fn) => { try { fn(data); } catch {} });
+  state.clients.forEach(fn => { try { fn(data); } catch {} });
 }
 
 export function addClient(fn: SendFn) { state.clients.add(fn); }
 export function removeClient(fn: SendFn) { state.clients.delete(fn); }
 
-function assignSlot(slots: (number | null)[], order: Order, slotKey: 'cafeSlot' | 'foodSlot') {
-  const idx = slots.findIndex(s => s === null);
-  if (idx >= 0) { slots[idx] = order.id; order[slotKey] = idx + 1; }
+function assignSlot(slots: (number | null)[], order: Order, key: 'cafeSlot' | 'foodSlot') {
+  const i = slots.findIndex(s => s === null);
+  if (i >= 0) { slots[i] = order.id; order[key] = i + 1; }
 }
 
-function freeAndReassign(
-  slots: (number | null)[],
-  order: Order,
-  slotKey: 'cafeSlot' | 'foodSlot',
-  statusKey: 'cafeStatus' | 'foodStatus'
-) {
+function freeAndReassign(slots: (number | null)[], order: Order, slotKey: 'cafeSlot' | 'foodSlot', statusKey: 'cafeStatus' | 'foodStatus') {
   if (!order[slotKey]) return;
   slots[order[slotKey]! - 1] = null;
   order[slotKey] = undefined;
-
   const next = Array.from(state.orders.values())
     .filter(o => o[statusKey] === 'preparing' && !o[slotKey])
     .sort((a, b) => a.createdAt - b.createdAt)[0];
@@ -187,14 +257,12 @@ function freeAndReassign(
 const stmtInsert = db.prepare(
   'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options) VALUES (?, ?, ?, ?, ?, ?, ?)'
 );
-const stmtUpdate = db.prepare(
-  'UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?'
-);
+const stmtUpdate = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
 
 export function createOrder(
   cafeItems: Record<string, number>,
   foodItems: Record<string, number>,
-  itemOptions: Record<string, string[]> = {}
+  itemOptions: Record<string, Record<string, string>> = {}
 ): Order {
   const hasCafe = Object.values(cafeItems).some(v => v > 0);
   const hasFood = Object.values(foodItems).some(v => v > 0);
@@ -207,14 +275,10 @@ export function createOrder(
     createdAt: Date.now(),
     itemOptions,
   };
-
   if (hasCafe) assignSlot(state.cafeSlots, order, 'cafeSlot');
   if (hasFood) assignSlot(state.foodSlots, order, 'foodSlot');
-
-  stmtInsert.run(
-    order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
-    order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions)
-  );
+  stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
+    order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions));
   state.orders.set(order.id, order);
   broadcast();
   return order;
@@ -224,36 +288,84 @@ export function updateOrder(id: number, action: string): boolean {
   const order = state.orders.get(id);
   if (!order) return false;
   ({
-    'cafe-ready':  () => { if (order.cafeStatus === 'preparing') { order.cafeStatus = 'ready'; freeAndReassign(state.cafeSlots, order, 'cafeSlot', 'cafeStatus'); } },
-    'food-ready':  () => { if (order.foodStatus === 'preparing') { order.foodStatus = 'ready'; freeAndReassign(state.foodSlots, order, 'foodSlot', 'foodStatus'); } },
-    'cafe-pickup': () => { if (order.cafeStatus === 'ready') order.cafeStatus = 'picked'; },
-    'food-pickup': () => { if (order.foodStatus === 'ready') order.foodStatus = 'picked'; },
+    'cafe-ready': () => {
+      if (order.cafeStatus === 'preparing') {
+        order.cafeStatus = 'ready';
+        freeAndReassign(state.cafeSlots, order, 'cafeSlot', 'cafeStatus');
+        // 수령대 슬롯 배정
+        assignSlot(state.cafePickupSlots, order, 'cafePickupSlot');
+      }
+    },
+    'food-ready': () => {
+      if (order.foodStatus === 'preparing') {
+        order.foodStatus = 'ready';
+        freeAndReassign(state.foodSlots, order, 'foodSlot', 'foodStatus');
+        assignSlot(state.foodPickupSlots, order, 'foodPickupSlot');
+      }
+    },
+    'cafe-pickup': () => {
+      if (order.cafeStatus === 'ready') {
+        order.cafeStatus = 'picked';
+        freeAndReassign(state.cafePickupSlots, order, 'cafePickupSlot', 'cafeStatus');
+      }
+    },
+    'food-pickup': () => {
+      if (order.foodStatus === 'ready') {
+        order.foodStatus = 'picked';
+        freeAndReassign(state.foodPickupSlots, order, 'foodPickupSlot', 'foodStatus');
+      }
+    },
   } as Record<string, () => void>)[action]?.();
   stmtUpdate.run(order.cafeStatus, order.foodStatus, order.id);
   broadcast();
   return true;
 }
 
+// ── 메뉴 CRUD ────────────────────────────────────────────────
 export function getMenuItems(): MenuItem[] {
-  return (db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as Array<{
-    id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number; is_set: number;
-  }>).map(r => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order, isSet: r.is_set === 1 }));
+  const items = db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as Array<{
+    id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number;
+  }>();
+  const allGroups = db.prepare('SELECT * FROM option_groups ORDER BY sort_order, id').all() as Array<{
+    id: number; menu_item_id: number; name: string; required: number;
+  }>();
+  const allOptions = db.prepare('SELECT * FROM option_items ORDER BY sort_order, id').all() as Array<{
+    id: number; group_id: number; name: string; price: number;
+  }>();
+
+  const optsByGroup = new Map<number, OptionItem[]>();
+  for (const o of allOptions) {
+    if (!optsByGroup.has(o.group_id)) optsByGroup.set(o.group_id, []);
+    optsByGroup.get(o.group_id)!.push({ id: o.id, name: o.name, price: o.price });
+  }
+  const groupsByItem = new Map<number, OptionGroup[]>();
+  for (const g of allGroups) {
+    if (!groupsByItem.has(g.menu_item_id)) groupsByItem.set(g.menu_item_id, []);
+    groupsByItem.get(g.menu_item_id)!.push({ id: g.id, name: g.name, required: g.required === 1, options: optsByGroup.get(g.id) ?? [] });
+  }
+
+  return items.map(r => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order, optionGroups: groupsByItem.get(r.id) ?? [] }));
 }
 
-export function addMenuItem(name: string, type: 'cafe' | 'food', price: number, isSet = false): MenuItem {
+export function addMenuItem(name: string, type: 'cafe' | 'food', price: number): MenuItem {
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM menu_items WHERE type = ?').get(type) as { next: number }).next;
-  const result = db.prepare('INSERT INTO menu_items (name, type, price, sort_order, is_set) VALUES (?, ?, ?, ?, ?)').run(name, type, price, maxOrder, isSet ? 1 : 0);
-  return { id: Number(result.lastInsertRowid), name, type, price, sortOrder: maxOrder, isSet };
+  const { lastInsertRowid: id } = db.prepare('INSERT INTO menu_items (name, type, price, sort_order) VALUES (?, ?, ?, ?)').run(name, type, price, maxOrder);
+  return { id: Number(id), name, type, price, sortOrder: maxOrder, optionGroups: [] };
 }
 
 export function deleteMenuItem(id: number): boolean {
-  return (db.prepare('DELETE FROM menu_items WHERE id = ?').run(id)).changes > 0;
+  const gids = (db.prepare('SELECT id FROM option_groups WHERE menu_item_id = ?').all(id) as { id: number }[]).map(r => r.id);
+  db.transaction(() => {
+    for (const gid of gids) db.prepare('DELETE FROM option_items WHERE group_id = ?').run(gid);
+    db.prepare('DELETE FROM option_groups WHERE menu_item_id = ?').run(id);
+    db.prepare('DELETE FROM menu_items WHERE id = ?').run(id);
+  })();
+  return true;
 }
 
+// ── 통계 / 내보내기 ──────────────────────────────────────────
 export function getStats() {
-  const rows = db.prepare('SELECT cafe_items, food_items FROM orders').all() as Array<{
-    cafe_items: string; food_items: string;
-  }>;
+  const rows = db.prepare('SELECT cafe_items, food_items FROM orders').all() as Array<{ cafe_items: string; food_items: string }>;
   const cafeItems: Record<string, number> = {};
   const foodItems: Record<string, number> = {};
   for (const row of rows) {
@@ -265,11 +377,46 @@ export function getStats() {
   return { totalOrders: rows.length, cafeItems, foodItems };
 }
 
+export function getOrdersForExport() {
+  const priceMap = new Map(
+    (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
+  );
+  const rows = db.prepare('SELECT * FROM orders ORDER BY id').all() as DbRow[];
+
+  return rows.map(r => {
+    const cafeItems = JSON.parse(r.cafe_items) as Record<string, number>;
+    const foodItems = JSON.parse(r.food_items) as Record<string, number>;
+    let rawOpts: Record<string, unknown> = {};
+    try { rawOpts = JSON.parse(r.item_options || '{}'); } catch { /* empty */ }
+
+    let total = 0;
+    for (const [n, q] of Object.entries(cafeItems)) if (q > 0) total += (priceMap.get(n) ?? 0) * q;
+    for (const [n, q] of Object.entries(foodItems)) if (q > 0) total += (priceMap.get(n) ?? 0) * q;
+
+    const itemsList = [
+      ...Object.entries(cafeItems).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n),
+      ...Object.entries(foodItems).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n),
+    ].join(', ');
+
+    const optionsStr = Object.entries(rawOpts)
+      .filter(([, v]) => v && typeof v === 'object' && !Array.isArray(v))
+      .map(([, v]) => Object.values(v as Record<string, string>).join('+'))
+      .join('; ');
+
+    const d = new Date(r.created_at);
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+    return { id: r.id, date: dateStr, items: itemsList, options: optionsStr, total };
+  });
+}
+
 export function resetOrders(): void {
   db.prepare('DELETE FROM orders').run();
   state.orders.clear();
   state.nextId = 1;
-  state.cafeSlots = Array(10).fill(null);
-  state.foodSlots = Array(10).fill(null);
+  state.cafeSlots        = Array(10).fill(null);
+  state.foodSlots        = Array(10).fill(null);
+  state.cafePickupSlots  = Array(10).fill(null);
+  state.foodPickupSlots  = Array(10).fill(null);
   broadcast();
 }
