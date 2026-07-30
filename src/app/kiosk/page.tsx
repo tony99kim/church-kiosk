@@ -4,26 +4,24 @@ import type { MenuItem } from '@/lib/store';
 
 function won(n: number) { return n.toLocaleString('ko-KR') + '원'; }
 
-// groupName → { optionName: qty }
+// groupId(string) → { optionName: qty }  ← 이름 대신 ID 사용으로 동명 그룹 충돌 방지
 type GroupSel = Record<string, Record<string, number>>;
 interface CartEntry { qty: number; options: GroupSel; }
 
 function defaultOptions(item: MenuItem): GroupSel {
   const opts: GroupSel = {};
   for (const g of item.optionGroups) {
-    // maxQty=1 필수 그룹만 첫 옵션 선택, 나머지는 빈 객체로 초기화
-    opts[g.name] = (g.maxQty === 1 && g.required && g.options.length > 0)
+    opts[String(g.id)] = (g.maxQty === 1 && g.required && g.options.length > 0)
       ? { [g.options[0].name]: 1 }
       : {};
   }
   return opts;
 }
 
-// 기존 선택값에 누락된 그룹 키 보완 (그룹 변경 후 초기화 방지)
 function mergeWithDefaults(existing: GroupSel, item: MenuItem): GroupSel {
   const merged = { ...existing };
   for (const g of item.optionGroups) {
-    if (!(g.name in merged)) merged[g.name] = {};
+    if (!(String(g.id) in merged)) merged[String(g.id)] = {};
   }
   return merged;
 }
@@ -85,10 +83,10 @@ export default function KioskPage() {
     if (!modal) return;
     for (const g of modal.optionGroups) {
       if (!g.required) continue;
-      const sel = tempOpts[g.name] ?? {};
+      const sel = tempOpts[String(g.id)] ?? {};
       const total = Object.values(sel).reduce((s, q) => s + q, 0);
       if (total !== g.maxQty) {
-        alert(`"${g.name}" ${g.maxQty}개를 선택해주세요. (현재 ${total}개)`);
+        alert(`"${g.name || '옵션'}" ${g.maxQty}개를 선택해주세요. (현재 ${total}개)`);
         return;
       }
     }
@@ -107,13 +105,19 @@ export default function KioskPage() {
     try {
       const cafeItems: Record<string, number> = {};
       const foodItems: Record<string, number> = {};
-      const itemOptions: Record<string, GroupSel> = {};
+      const itemOptions: Record<string, Record<string, Record<string, number>>> = {};
       for (const [idStr, { qty, options }] of Object.entries(cart)) {
         const item = menus.find(m => m.id === Number(idStr));
         if (!item || qty <= 0) continue;
         if (item.type === 'cafe') cafeItems[item.name] = qty;
         else foodItems[item.name] = qty;
-        if (Object.keys(options).length > 0) itemOptions[item.name] = options;
+        // 그룹 ID 키 → 그룹 이름 키로 변환 (준비대 화면 표시용)
+        const namedOpts: Record<string, Record<string, number>> = {};
+        for (const g of item.optionGroups) {
+          const sel = options[String(g.id)] ?? {};
+          if (Object.values(sel).some(q => q > 0)) namedOpts[g.name || String(g.id)] = sel;
+        }
+        if (Object.keys(namedOpts).length > 0) itemOptions[item.name] = namedOpts;
       }
       const res = await fetch('/api/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -154,11 +158,11 @@ export default function KioskPage() {
 
   // ── 옵션 그룹 렌더 ──
   const renderGroup = (group: MenuItem['optionGroups'][0]) => {
-    const sel = tempOpts[group.name] ?? {};
+    const gk = String(group.id);
+    const sel = tempOpts[gk] ?? {};
     const totalSel = Object.values(sel).reduce((s, q) => s + q, 0);
 
     if (group.maxQty === 1) {
-      // 단일 선택 — 라디오 스타일
       const selected = Object.keys(sel).find(k => sel[k] > 0);
       return (
         <div className="grid grid-cols-2 gap-2">
@@ -166,7 +170,7 @@ export default function KioskPage() {
             const isSelected = selected === opt.name;
             return (
               <button key={opt.id} type="button"
-                onClick={(e) => { e.preventDefault(); setTempOpts(p => ({ ...p, [group.name]: { [opt.name]: 1 } })); }}
+                onClick={(e) => { e.preventDefault(); setTempOpts(p => ({ ...p, [gk]: { [opt.name]: 1 } })); }}
                 className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors ${
                   isSelected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
                 }`}>
@@ -195,21 +199,20 @@ export default function KioskPage() {
               <div className="flex items-center gap-3">
                 <button type="button"
                   onClick={(e) => { e.preventDefault(); setTempOpts(p => {
-                    const g = { ...p[group.name] };
+                    const g = { ...p[gk] };
                     g[opt.name] = Math.max(0, (g[opt.name] ?? 0) - 1);
-                    return { ...p, [group.name]: g };
+                    return { ...p, [gk]: g };
                   }); }}
                   disabled={optQty === 0}
                   className="w-8 h-8 rounded-full bg-slate-200 text-xl font-bold flex items-center justify-center disabled:opacity-30">−</button>
                 <span className="text-lg font-black w-5 text-center">{optQty}</span>
                 <button type="button"
                   onClick={(e) => { e.preventDefault(); setTempOpts(p => {
-                    const g = { ...p[group.name] };
-                    // maxQty 초과 방지 — 빠른 탭에서도 안전
+                    const g = { ...p[gk] };
                     const total = Object.values(g).reduce((s, q) => s + q, 0);
                     if (total >= group.maxQty) return p;
                     g[opt.name] = (g[opt.name] ?? 0) + 1;
-                    return { ...p, [group.name]: g };
+                    return { ...p, [gk]: g };
                   }); }}
                   disabled={totalSel >= group.maxQty}
                   className="w-8 h-8 rounded-full bg-blue-600 text-white text-xl font-bold flex items-center justify-center disabled:opacity-30 active:bg-blue-700">+</button>
