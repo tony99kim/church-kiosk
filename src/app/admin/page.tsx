@@ -73,10 +73,20 @@ export default function AdminPage() {
 
   const saveOptions = async () => {
     if (!optItem) return;
-    await fetch(`/api/menu/${optItem.id}/options`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groups: editGroups }),
-    });
+    try {
+      const res = await fetch(`/api/menu/${optItem.id}/options`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groups: editGroups }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        alert(`저장 실패 (${res.status}): ${text}`);
+        return;
+      }
+    } catch (e) {
+      alert(`저장 오류: ${String(e)}`);
+      return;
+    }
     setOptItem(null); loadMenus();
   };
 
