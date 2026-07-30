@@ -552,7 +552,12 @@ export function cancelOrder(id: number): boolean {
   if (foodPickupSlot)  state.foodPickupSlots[foodPickupSlot - 1]   = null;
 
   state.orders.delete(id);
-  db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?').run(id);
+  const stmtRestoreStock = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
+  db.transaction(() => {
+    db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?').run(id);
+    for (const [name, qty] of Object.entries(order.cafeItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
+    for (const [name, qty] of Object.entries(order.foodItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
+  })();
 
   // 빈 슬롯에 오버플로우 주문 배정
   if (cafeSlot) {
