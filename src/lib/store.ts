@@ -322,16 +322,14 @@ export function updateOrder(id: number, action: string): boolean {
 }
 
 // ── 메뉴 CRUD ────────────────────────────────────────────────
+type DbMenuRow   = { id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number };
+type DbGroupRow  = { id: number; menu_item_id: number; name: string; required: number };
+type DbOptionRow = { id: number; group_id: number; name: string; price: number };
+
 export function getMenuItems(): MenuItem[] {
-  const items = db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as Array<{
-    id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number;
-  }>();
-  const allGroups = db.prepare('SELECT * FROM option_groups ORDER BY sort_order, id').all() as Array<{
-    id: number; menu_item_id: number; name: string; required: number;
-  }>();
-  const allOptions = db.prepare('SELECT * FROM option_items ORDER BY sort_order, id').all() as Array<{
-    id: number; group_id: number; name: string; price: number;
-  }>();
+  const items      = db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as DbMenuRow[];
+  const allGroups  = db.prepare('SELECT * FROM option_groups ORDER BY sort_order, id').all() as DbGroupRow[];
+  const allOptions = db.prepare('SELECT * FROM option_items ORDER BY sort_order, id').all() as DbOptionRow[];
 
   const optsByGroup = new Map<number, OptionItem[]>();
   for (const o of allOptions) {
