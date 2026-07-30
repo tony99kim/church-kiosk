@@ -13,6 +13,7 @@ export interface OptionGroup {
   id: number;
   name: string;
   required: boolean;
+  maxQty: number;
   options: OptionItem[];
 }
 
@@ -36,8 +37,8 @@ export interface Order {
   foodSlot?: number;        // 음식 준비대 (1-10)
   cafePickupSlot?: number;  // 카페 수령대 (1-10)
   foodPickupSlot?: number;  // 음식 수령대 (1-10)
-  // groupName → selected option name (per menu item name)
-  itemOptions: Record<string, Record<string, string>>;
+  // itemName → groupName → { optionName: qty }
+  itemOptions: Record<string, Record<string, Record<string, number>>>;
 }
 
 type SendFn = (data: string) => void;
@@ -101,22 +102,23 @@ db.exec(`
 try { db.exec("ALTER TABLE orders ADD COLUMN item_options TEXT NOT NULL DEFAULT '{}'"); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN is_set INTEGER NOT NULL DEFAULT 0'); } catch {}
+try { db.exec('ALTER TABLE option_groups ADD COLUMN max_qty INTEGER NOT NULL DEFAULT 1'); } catch {}
 
 // ── 메뉴 옵션 그룹 저장 (replace all) ────────────────────────
 export function saveMenuOptions(
   menuItemId: number,
-  groups: Array<{ name: string; required: boolean; options: Array<{ name: string; price: number }> }>
+  groups: Array<{ name: string; required: boolean; maxQty?: number; options: Array<{ name: string; price: number }> }>
 ): void {
   db.transaction(() => {
     const gids = (db.prepare('SELECT id FROM option_groups WHERE menu_item_id = ?').all(menuItemId) as { id: number }[]).map(r => r.id);
     for (const gid of gids) db.prepare('DELETE FROM option_items WHERE group_id = ?').run(gid);
     db.prepare('DELETE FROM option_groups WHERE menu_item_id = ?').run(menuItemId);
 
-    const insGroup = db.prepare('INSERT INTO option_groups (menu_item_id, name, required, sort_order) VALUES (?, ?, ?, ?)');
+    const insGroup = db.prepare('INSERT INTO option_groups (menu_item_id, name, required, max_qty, sort_order) VALUES (?, ?, ?, ?, ?)');
     const insItem  = db.prepare('INSERT INTO option_items  (group_id, name, price, sort_order) VALUES (?, ?, ?, ?)');
 
     groups.forEach((g, gi) => {
-      const { lastInsertRowid: gid } = insGroup.run(menuItemId, g.name, g.required ? 1 : 0, gi);
+      const { lastInsertRowid: gid } = insGroup.run(menuItemId, g.name, g.required ? 1 : 0, g.maxQty ?? 1, gi);
       g.options.forEach((o, oi) => insItem.run(gid, o.name, o.price, oi));
     });
   })();
@@ -144,15 +146,15 @@ if (menuCount === 0) {
   })();
 }
 
-// 세트메뉴 옵션 그룹 초기 시딩
+// 세트메뉴 옵션 그룹 시딩 (주먹밥 ①②를 maxQty=2 그룹으로 통합)
 const setMenuItem = db.prepare("SELECT id FROM menu_items WHERE name = '세트메뉴(주먹밥2+컵라면1)'").get() as { id: number } | undefined;
 if (setMenuItem) {
+  const oldGroup = db.prepare("SELECT id FROM option_groups WHERE name = '주먹밥 ①' AND menu_item_id = ?").get(setMenuItem.id);
   const gc = (db.prepare('SELECT COUNT(*) as c FROM option_groups WHERE menu_item_id = ?').get(setMenuItem.id) as { c: number }).c;
-  if (gc === 0) {
+  if (gc === 0 || oldGroup) {
     saveMenuOptions(setMenuItem.id, [
-      { name: '주먹밥 ①', required: true,  options: [{ name: '멸치주먹밥', price: 0 }, { name: '참치마요주먹밥', price: 0 }] },
-      { name: '주먹밥 ②', required: true,  options: [{ name: '멸치주먹밥', price: 0 }, { name: '참치마요주먹밥', price: 0 }] },
-      { name: '컵라면',   required: true,  options: [{ name: '짜장컵라면', price: 0 }, { name: '육개장컵라면', price: 0 }] },
+      { name: '주먹밥 선택', required: true, maxQty: 2, options: [{ name: '멸치주먹밥', price: 0 }, { name: '참치마요주먹밥', price: 0 }] },
+      { name: '컵라면 선택', required: true, maxQty: 1, options: [{ name: '짜장컵라면', price: 0 }, { name: '육개장컵라면', price: 0 }] },
     ]);
   }
 }
@@ -167,13 +169,20 @@ function loadFromDb(): Map<number, Order> {
   const rows = db.prepare('SELECT * FROM orders').all() as DbRow[];
   const map = new Map<number, Order>();
   for (const r of rows) {
-    let itemOptions: Record<string, Record<string, string>> = {};
+    let itemOptions: Record<string, Record<string, Record<string, number>>> = {};
     try {
       const raw = JSON.parse(r.item_options || '{}');
-      // 새 포맷(object)만 사용, 구 포맷(array)은 무시
       for (const [k, v] of Object.entries(raw)) {
-        if (v && typeof v === 'object' && !Array.isArray(v))
-          itemOptions[k] = v as Record<string, string>;
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+        const converted: Record<string, Record<string, number>> = {};
+        for (const [gk, gv] of Object.entries(v as Record<string, unknown>)) {
+          if (typeof gv === 'string') {
+            converted[gk] = { [gv]: 1 }; // 구 포맷 변환
+          } else if (gv && typeof gv === 'object' && !Array.isArray(gv)) {
+            converted[gk] = gv as Record<string, number>;
+          }
+        }
+        itemOptions[k] = converted;
       }
     } catch { /* ignore */ }
 
@@ -265,7 +274,7 @@ const stmtUpdate = db.prepare('UPDATE orders SET cafe_status = ?, food_status = 
 export function createOrder(
   cafeItems: Record<string, number>,
   foodItems: Record<string, number>,
-  itemOptions: Record<string, Record<string, string>> = {}
+  itemOptions: Record<string, Record<string, Record<string, number>>> = {}
 ): Order {
   const hasCafe = Object.values(cafeItems).some(v => v > 0);
   const hasFood = Object.values(foodItems).some(v => v > 0);
@@ -326,7 +335,7 @@ export function updateOrder(id: number, action: string): boolean {
 
 // ── 메뉴 CRUD ────────────────────────────────────────────────
 type DbMenuRow   = { id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number };
-type DbGroupRow  = { id: number; menu_item_id: number; name: string; required: number };
+type DbGroupRow  = { id: number; menu_item_id: number; name: string; required: number; max_qty: number };
 type DbOptionRow = { id: number; group_id: number; name: string; price: number };
 
 export function getMenuItems(): MenuItem[] {
@@ -342,7 +351,7 @@ export function getMenuItems(): MenuItem[] {
   const groupsByItem = new Map<number, OptionGroup[]>();
   for (const g of allGroups) {
     if (!groupsByItem.has(g.menu_item_id)) groupsByItem.set(g.menu_item_id, []);
-    groupsByItem.get(g.menu_item_id)!.push({ id: g.id, name: g.name, required: g.required === 1, options: optsByGroup.get(g.id) ?? [] });
+    groupsByItem.get(g.menu_item_id)!.push({ id: g.id, name: g.name, required: g.required === 1, maxQty: g.max_qty ?? 1, options: optsByGroup.get(g.id) ?? [] });
   }
 
   return items.map(r => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order, optionGroups: groupsByItem.get(r.id) ?? [] }));
@@ -401,7 +410,14 @@ export function getOrdersForExport() {
 
     const optionsStr = Object.entries(rawOpts)
       .filter(([, v]) => v && typeof v === 'object' && !Array.isArray(v))
-      .map(([, v]) => Object.values(v as Record<string, string>).join('+'))
+      .map(([, v]) => Object.entries(v as Record<string, unknown>).map(([gk, gv]) => {
+        if (typeof gv === 'string') return `${gk}:${gv}`;
+        if (gv && typeof gv === 'object' && !Array.isArray(gv)) {
+          const parts = Object.entries(gv as Record<string, number>).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n).join('+');
+          return parts ? `${gk}:${parts}` : null;
+        }
+        return null;
+      }).filter(Boolean).join(', '))
       .join('; ');
 
     const d = new Date(r.created_at);

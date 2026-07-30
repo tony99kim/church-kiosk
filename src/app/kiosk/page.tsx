@@ -4,12 +4,18 @@ import type { MenuItem } from '@/lib/store';
 
 function won(n: number) { return n.toLocaleString('ko-KR') + '원'; }
 
-interface CartEntry { qty: number; options: Record<string, string>; }
+// groupName → { optionName: qty }
+type GroupSel = Record<string, Record<string, number>>;
+interface CartEntry { qty: number; options: GroupSel; }
 
-function defaultOptions(item: MenuItem): Record<string, string> {
-  const opts: Record<string, string> = {};
+function defaultOptions(item: MenuItem): GroupSel {
+  const opts: GroupSel = {};
   for (const g of item.optionGroups) {
-    if (g.required && g.options.length > 0) opts[g.name] = g.options[0].name;
+    if (g.maxQty === 1 && g.required && g.options.length > 0) {
+      opts[g.name] = { [g.options[0].name]: 1 };
+    } else {
+      opts[g.name] = {};
+    }
   }
   return opts;
 }
@@ -18,11 +24,11 @@ export default function KioskPage() {
   const [menus, setMenus]   = useState<MenuItem[]>([]);
   const [cart, setCart]     = useState<Record<number, CartEntry>>({});
   const [modal, setModal]   = useState<MenuItem | null>(null);
-  const [tempQty, setTempQty]       = useState(1);
-  const [tempOpts, setTempOpts]     = useState<Record<string, string>>({});
-  const [orderNum, setOrderNum]     = useState<number | null>(null);
-  const [totalPaid, setTotalPaid]   = useState(0);
-  const [loading, setLoading]       = useState(false);
+  const [tempQty, setTempQty]   = useState(1);
+  const [tempOpts, setTempOpts] = useState<GroupSel>({});
+  const [orderNum, setOrderNum] = useState<number | null>(null);
+  const [totalPaid, setTotalPaid] = useState(0);
+  const [loading, setLoading]   = useState(false);
 
   useEffect(() => { fetch('/api/menu').then(r => r.json()).then(setMenus); }, []);
 
@@ -45,8 +51,11 @@ export default function KioskPage() {
   const addToCart = () => {
     if (!modal) return;
     for (const g of modal.optionGroups) {
-      if (g.required && !tempOpts[g.name]) {
-        alert(`"${g.name}"을(를) 선택해주세요.`);
+      if (!g.required) continue;
+      const sel = tempOpts[g.name] ?? {};
+      const total = Object.values(sel).reduce((s, q) => s + q, 0);
+      if (total !== g.maxQty) {
+        alert(`"${g.name}" ${g.maxQty}개를 선택해주세요. (현재 ${total}개)`);
         return;
       }
     }
@@ -64,7 +73,7 @@ export default function KioskPage() {
     setLoading(true);
     const cafeItems: Record<string, number> = {};
     const foodItems: Record<string, number> = {};
-    const itemOptions: Record<string, Record<string, string>> = {};
+    const itemOptions: Record<string, GroupSel> = {};
     for (const [idStr, { qty, options }] of Object.entries(cart)) {
       const item = menus.find(m => m.id === Number(idStr));
       if (!item || qty <= 0) continue;
@@ -124,6 +133,74 @@ export default function KioskPage() {
         )}
         <p className={`text-sm font-bold mt-1 ${inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
       </button>
+    );
+  };
+
+  // ── 옵션 그룹 렌더 ──
+  const renderGroup = (group: MenuItem['optionGroups'][0]) => {
+    const sel = tempOpts[group.name] ?? {};
+    const totalSel = Object.values(sel).reduce((s, q) => s + q, 0);
+    const remaining = group.maxQty - totalSel;
+
+    if (group.maxQty === 1) {
+      // 단일 선택 — 라디오 스타일
+      const selected = Object.keys(sel).find(k => sel[k] > 0);
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          {group.options.map(opt => {
+            const isSelected = selected === opt.name;
+            return (
+              <button key={opt.id}
+                onClick={() => setTempOpts(p => ({ ...p, [group.name]: { [opt.name]: 1 } }))}
+                className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors ${
+                  isSelected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                }`}>
+                <span className="block">{opt.name}</span>
+                {opt.price > 0 && <span className="text-xs text-blue-400">+{won(opt.price)}</span>}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // 수량 선택 — maxQty > 1
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-slate-400 px-1 mb-1">
+          <span>총 {group.maxQty}개 선택</span>
+          <span className={totalSel === group.maxQty ? 'text-blue-600 font-bold' : 'text-amber-500 font-bold'}>
+            {totalSel}/{group.maxQty}개 선택됨
+          </span>
+        </div>
+        {group.options.map(opt => {
+          const optQty = sel[opt.name] ?? 0;
+          return (
+            <div key={opt.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 ${optQty > 0 ? 'border-blue-400 bg-blue-50' : 'border-slate-200'}`}>
+              <span className={`flex-1 text-sm font-medium ${optQty > 0 ? 'text-blue-700' : 'text-slate-600'}`}>{opt.name}</span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setTempOpts(p => {
+                    const g = { ...p[group.name] };
+                    g[opt.name] = Math.max(0, (g[opt.name] ?? 0) - 1);
+                    return { ...p, [group.name]: g };
+                  })}
+                  disabled={optQty === 0}
+                  className="w-8 h-8 rounded-full bg-slate-200 text-xl font-bold flex items-center justify-center disabled:opacity-30">−</button>
+                <span className="text-lg font-black w-5 text-center">{optQty}</span>
+                <button
+                  onClick={() => setTempOpts(p => {
+                    const g = { ...p[group.name] };
+                    g[opt.name] = (g[opt.name] ?? 0) + 1;
+                    return { ...p, [group.name]: g };
+                  })}
+                  disabled={remaining === 0}
+                  className="w-8 h-8 rounded-full bg-blue-600 text-white text-xl font-bold flex items-center justify-center disabled:opacity-30 active:bg-blue-700">+</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     );
   };
 
@@ -194,20 +271,7 @@ export default function KioskPage() {
                       : <span className="text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full">선택</span>
                     }
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {group.options.map(opt => {
-                      const selected = tempOpts[group.name] === opt.name;
-                      return (
-                        <button key={opt.id} onClick={() => setTempOpts(p => ({ ...p, [group.name]: opt.name }))}
-                          className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors ${
-                            selected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                          }`}>
-                          <span className="block">{opt.name}</span>
-                          {opt.price > 0 && <span className="text-xs text-blue-400">+{won(opt.price)}</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {renderGroup(group)}
                 </div>
               ))}
               {modal.optionGroups.length === 0 && (

@@ -4,7 +4,15 @@ import type { Order } from '@/lib/store';
 
 function formatOptions(opts: unknown): string | null {
   if (!opts || typeof opts !== 'object' || Array.isArray(opts)) return null;
-  return Object.values(opts as Record<string, string>).join(' / ');
+  const parts: string[] = [];
+  for (const [, v] of Object.entries(opts as Record<string, unknown>)) {
+    if (typeof v === 'string') { parts.push(v); continue; }
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const s = Object.entries(v as Record<string, number>).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n).join('+');
+      if (s) parts.push(s);
+    }
+  }
+  return parts.length ? parts.join(' / ') : null;
 }
 
 function SlotCard({ slot, order }: { slot: number; order?: Order }) {

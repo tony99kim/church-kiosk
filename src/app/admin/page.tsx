@@ -4,7 +4,7 @@ import type { MenuItem, OptionGroup } from '@/lib/store';
 
 interface Stats { totalOrders: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; }
 
-type EditGroup = { id?: number; name: string; required: boolean; options: { id?: number; name: string; price: number }[] };
+type EditGroup = { id?: number; name: string; required: boolean; maxQty: number; options: { id?: number; name: string; price: number }[] };
 
 export default function AdminPage() {
   const [tab, setTab]       = useState<'menu' | 'stats'>('menu');
@@ -42,7 +42,7 @@ export default function AdminPage() {
   const openOptions = (item: MenuItem) => {
     setOptItem(item);
     setEditGroups(item.optionGroups.map(g => ({
-      id: g.id, name: g.name, required: g.required,
+      id: g.id, name: g.name, required: g.required, maxQty: g.maxQty,
       options: g.options.map(o => ({ id: o.id, name: o.name, price: o.price })),
     })));
   };
@@ -56,7 +56,7 @@ export default function AdminPage() {
     setOptItem(null); loadMenus();
   };
 
-  const addGroup = () => setEditGroups(p => [...p, { name: '', required: true, options: [] }]);
+  const addGroup = () => setEditGroups(p => [...p, { name: '', required: true, maxQty: 1, options: [] }]);
   const removeGroup = (gi: number) => setEditGroups(p => p.filter((_, i) => i !== gi));
   const updateGroup = (gi: number, key: keyof EditGroup, val: unknown) =>
     setEditGroups(p => p.map((g, i) => i === gi ? { ...g, [key]: val } : g));
@@ -221,6 +221,15 @@ export default function AdminPage() {
                       placeholder="그룹 이름 (예: 주먹밥 선택)"
                       className="flex-1 text-sm font-medium bg-transparent border-none outline-none"
                     />
+                    <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0">
+                      선택 수량
+                      <input
+                        type="number" min="1" max="10"
+                        value={group.maxQty}
+                        onChange={e => updateGroup(gi, 'maxQty', Math.max(1, Number(e.target.value) || 1))}
+                        className="w-12 border border-slate-300 rounded px-1 py-0.5 text-center text-xs ml-1"
+                      />
+                    </label>
                     <label className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">
                       <input type="checkbox" checked={group.required}
                         onChange={e => updateGroup(gi, 'required', e.target.checked)}
