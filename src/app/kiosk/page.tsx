@@ -71,24 +71,30 @@ export default function KioskPage() {
   const handleOrder = async () => {
     if (totalQty === 0 || loading) return;
     setLoading(true);
-    const cafeItems: Record<string, number> = {};
-    const foodItems: Record<string, number> = {};
-    const itemOptions: Record<string, GroupSel> = {};
-    for (const [idStr, { qty, options }] of Object.entries(cart)) {
-      const item = menus.find(m => m.id === Number(idStr));
-      if (!item || qty <= 0) continue;
-      if (item.type === 'cafe') cafeItems[item.name] = qty;
-      else foodItems[item.name] = qty;
-      if (Object.keys(options).length > 0) itemOptions[item.name] = options;
+    try {
+      const cafeItems: Record<string, number> = {};
+      const foodItems: Record<string, number> = {};
+      const itemOptions: Record<string, GroupSel> = {};
+      for (const [idStr, { qty, options }] of Object.entries(cart)) {
+        const item = menus.find(m => m.id === Number(idStr));
+        if (!item || qty <= 0) continue;
+        if (item.type === 'cafe') cafeItems[item.name] = qty;
+        else foodItems[item.name] = qty;
+        if (Object.keys(options).length > 0) itemOptions[item.name] = options;
+      }
+      const res = await fetch('/api/orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cafeItems, foodItems, itemOptions }),
+      });
+      if (!res.ok) throw new Error(`서버 오류: ${res.status}`);
+      const data = await res.json();
+      setTotalPaid(totalAmount);
+      setOrderNum(data.id);
+    } catch (e) {
+      alert(`주문 실패: ${String(e)}`);
+    } finally {
+      setLoading(false);
     }
-    const res = await fetch('/api/orders', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cafeItems, foodItems, itemOptions }),
-    });
-    const data = await res.json();
-    setTotalPaid(totalAmount);
-    setOrderNum(data.id);
-    setLoading(false);
   };
 
   const resetAll = () => { setOrderNum(null); setCart({}); setTotalPaid(0); };
