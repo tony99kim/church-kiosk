@@ -74,7 +74,8 @@ db.exec(`
     cafe_status  TEXT    NOT NULL,
     food_status  TEXT    NOT NULL,
     created_at   INTEGER NOT NULL,
-    item_options TEXT    NOT NULL DEFAULT '{}'
+    item_options TEXT    NOT NULL DEFAULT '{}',
+    cancelled    INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS menu_items (
@@ -104,6 +105,7 @@ db.exec(`
 `);
 
 try { db.exec("ALTER TABLE orders ADD COLUMN item_options TEXT NOT NULL DEFAULT '{}'"); } catch {}
+try { db.exec('ALTER TABLE orders ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN is_set INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE option_groups ADD COLUMN max_qty INTEGER NOT NULL DEFAULT 1'); } catch {}
@@ -167,11 +169,11 @@ if (setMenuItem) {
 // ── DB 로드 ─────────────────────────────────────────────────
 type DbRow = {
   id: number; cafe_items: string; food_items: string;
-  cafe_status: Status; food_status: Status; created_at: number; item_options: string;
+  cafe_status: Status; food_status: Status; created_at: number; item_options: string; cancelled: number;
 };
 
 function loadFromDb(): Map<number, Order> {
-  const rows = db.prepare('SELECT * FROM orders').all() as DbRow[];
+  const rows = db.prepare('SELECT * FROM orders WHERE cancelled = 0').all() as DbRow[];
   const map = new Map<number, Order>();
   for (const r of rows) {
     let itemOptions: Record<string, Record<string, Record<string, number>>> = {};
@@ -424,7 +426,7 @@ function baseName(name: string): string {
 }
 
 export function getStats() {
-  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders').all() as Array<{
+  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0').all() as Array<{
     cafe_items: string; food_items: string; item_options: string;
   }>;
   const cafeItems: Record<string, number> = {};
@@ -459,7 +461,7 @@ export function getStats() {
 }
 
 export function getItemSummary(): { name: string; qty: number; isOption: boolean }[] {
-  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders').all() as Array<{
+  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0').all() as Array<{
     cafe_items: string; food_items: string; item_options: string;
   }>;
   const counts: Record<string, { qty: number; isOption: boolean }> = {};
@@ -503,6 +505,11 @@ export function getOrdersForExport() {
   const rows = db.prepare('SELECT * FROM orders ORDER BY id').all() as DbRow[];
 
   return rows.map(r => {
+    const d = new Date(r.created_at);
+    const dateStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+    if (r.cancelled) return { id: r.id, date: dateStr, items: '취소', options: '', total: 0 };
+
     let cafeItems: Record<string, number> = {};
     let foodItems: Record<string, number> = {};
     try { cafeItems = JSON.parse(r.cafe_items); } catch {}
@@ -531,9 +538,6 @@ export function getOrdersForExport() {
       }).filter(Boolean).join(', '))
       .join('; ');
 
-    const d = new Date(r.created_at);
-    const dateStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-
     return { id: r.id, date: dateStr, items: itemsList, options: optionsStr, total };
   });
 }
@@ -549,7 +553,7 @@ export function cancelOrder(id: number): boolean {
   if (foodPickupSlot)  state.foodPickupSlots[foodPickupSlot - 1]   = null;
 
   state.orders.delete(id);
-  db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+  db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?').run(id);
 
   // 빈 슬롯에 오버플로우 주문 배정
   if (cafeSlot) {
@@ -574,7 +578,7 @@ export function cancelOrder(id: number): boolean {
 }
 
 export function resetOrders(): void {
-  db.prepare('DELETE FROM orders').run();
+  db.prepare('DELETE FROM orders').run(); // 취소 포함 전체 삭제 (행사 초기화용)
   state.orders.clear();
   state.nextId = 1;
   state.cafeSlots        = Array(10).fill(null);
