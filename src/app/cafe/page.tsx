@@ -65,6 +65,37 @@ function SlotCard({ slot, order }: { slot: number; order?: Order }) {
   );
 }
 
+function OverflowCard({ order }: { order: Order }) {
+  const isReady = order.cafeStatus === 'ready';
+  const onReady = () => fetch(`/api/orders/${order.id}/cafe-ready`, { method: 'POST' });
+  const onPickup = () => fetch(`/api/orders/${order.id}/cafe-pickup`, { method: 'POST' });
+
+  const items = Object.entries(order.cafeItems).filter(([, n]) => n > 0)
+    .map(([name, n]) => n > 1 ? `${name} ×${n}` : name).join(' / ');
+  const optLines = Object.entries(order.itemOptions ?? {}).map(([, opts]) => formatOptions(opts)).filter(Boolean);
+
+  return (
+    <div className={`rounded-2xl border-2 p-3 flex items-center gap-3 ${
+      isReady ? 'bg-blue-50 border-blue-300' : 'bg-white border-amber-300'
+    }`}>
+      <span className={`text-3xl font-black shrink-0 ${isReady ? 'text-blue-500' : 'text-amber-600'}`}>{order.id}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-700 truncate">{items}</p>
+        {optLines.map((s, i) => <p key={i} className="text-xs text-blue-500 truncate">{s}</p>)}
+      </div>
+      {isReady ? (
+        <button onClick={onPickup} className="shrink-0 px-4 py-2 rounded-xl bg-blue-500 text-white text-sm font-bold active:bg-blue-600">
+          수령완료
+        </button>
+      ) : (
+        <button onClick={onReady} className="shrink-0 px-4 py-2 rounded-xl bg-green-500 text-white text-sm font-bold active:bg-green-600">
+          준비완료
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function CafePage() {
   const orders = useOrders();
   const active = orders.filter(o => o.cafeStatus === 'preparing' || o.cafeStatus === 'ready');
@@ -85,11 +116,9 @@ export default function CafePage() {
           {slots.map(({ slot, order }) => <SlotCard key={slot} slot={slot} order={order} />)}
         </div>
         {overflow.length > 0 && (
-          <div className="mt-3 bg-red-50 border border-red-200 rounded-2xl p-3">
-            <p className="text-sm font-bold text-red-600 mb-2">준비대 대기 중</p>
-            <div className="flex flex-wrap gap-2">
-              {overflow.map(o => <div key={o.id} className="bg-white border border-red-300 rounded-xl px-3 py-1 text-sm font-black text-red-600">#{o.id}</div>)}
-            </div>
+          <div className="mt-3 space-y-2">
+            <p className="text-sm font-bold text-red-600 px-1">준비대 대기 중</p>
+            {overflow.map(o => <OverflowCard key={o.id} order={o} />)}
           </div>
         )}
       </div>

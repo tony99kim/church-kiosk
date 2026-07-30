@@ -1,12 +1,18 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { MenuItem } from '@/lib/store';
 
 function won(n: number) { return n.toLocaleString('ko-KR') + '원'; }
 
-// groupId(string) → { optionName: qty }  ← 이름 대신 ID 사용으로 동명 그룹 충돌 방지
+// groupId(string) → { optionName: qty }
 type GroupSel = Record<string, Record<string, number>>;
-interface CartEntry { qty: number; options: GroupSel; }
+
+interface CartItem {
+  key: string;    // 카트 내 고유 키
+  itemId: number;
+  qty: number;
+  options: GroupSel;
+}
 
 function defaultOptions(item: MenuItem): GroupSel {
   const opts: GroupSel = {};
@@ -26,18 +32,17 @@ function mergeWithDefaults(existing: GroupSel, item: MenuItem): GroupSel {
   return merged;
 }
 
-type MenuCardProps = { item: MenuItem; cart: Record<number, CartEntry>; onOpen: (item: MenuItem) => void };
-function MenuCard({ item, cart, onOpen }: MenuCardProps) {
-  const entry = cart[item.id];
-  const inCart = entry && entry.qty > 0;
+type MenuCardProps = { item: MenuItem; totalQty: number; onOpen: () => void };
+function MenuCard({ item, totalQty, onOpen }: MenuCardProps) {
+  const inCart = totalQty > 0;
   return (
-    <button type="button" onClick={() => onOpen(item)}
+    <button type="button" onClick={onOpen}
       className={`relative text-left rounded-2xl p-4 border-2 transition-all active:scale-95 ${
         inCart ? 'border-blue-400 bg-blue-50 shadow-md' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
       }`}>
       {inCart && (
         <span className="absolute top-2 right-2 w-6 h-6 bg-blue-600 text-white text-xs font-black rounded-full flex items-center justify-center">
-          {entry.qty}
+          {totalQty}
         </span>
       )}
       <p className={`text-base font-semibold leading-snug pr-6 ${inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
@@ -50,33 +55,48 @@ function MenuCard({ item, cart, onOpen }: MenuCardProps) {
 }
 
 export default function KioskPage() {
-  const [menus, setMenus]   = useState<MenuItem[]>([]);
-  const [cart, setCart]     = useState<Record<number, CartEntry>>({});
-  const [modal, setModal]   = useState<MenuItem | null>(null);
+  const [menus, setMenus] = useState<MenuItem[]>([]);
+  const [cart, setCart]   = useState<CartItem[]>([]);
+  const [modal, setModal] = useState<MenuItem | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [tempQty, setTempQty]   = useState(1);
   const [tempOpts, setTempOpts] = useState<GroupSel>({});
   const [orderNum, setOrderNum] = useState<number | null>(null);
   const [totalPaid, setTotalPaid] = useState(0);
   const [loading, setLoading]   = useState(false);
+  const cartKeyRef = useRef(0);
 
   useEffect(() => { fetch('/api/menu').then(r => r.json()).then(setMenus); }, []);
 
   const cafeMenu = menus.filter(m => m.type === 'cafe');
   const foodMenu = menus.filter(m => m.type === 'food');
 
-  const totalQty = Object.values(cart).reduce((s, e) => s + e.qty, 0);
-  const totalAmount = menus.reduce((sum, item) => {
-    const e = cart[item.id];
-    return sum + (e ? item.price * e.qty : 0);
+  const itemQty = (itemId: number) => cart.filter(e => e.itemId === itemId).reduce((s, e) => s + e.qty, 0);
+  const totalQty    = cart.reduce((s, e) => s + e.qty, 0);
+  const totalAmount = cart.reduce((s, e) => {
+    const item = menus.find(m => m.id === e.itemId);
+    return s + (item ? item.price * e.qty : 0);
   }, 0);
 
-  const openModal = (item: MenuItem) => {
-    const existing = cart[item.id];
-    setModal(item);
-    setTempQty(existing?.qty ?? 1);
-    // 기존 선택 있으면 불러오되, 누락 그룹 키 보완
-    const base = existing?.options ?? defaultOptions(item);
-    setTempOpts(mergeWithDefaults(base, item));
+  const openModal = (item: MenuItem, cartKey?: string) => {
+    if (cartKey) {
+      // 기존 항목 편집 (옵션 없는 메뉴)
+      const entry = cart.find(e => e.key === cartKey);
+      setModal(item); setEditingKey(cartKey);
+      setTempQty(entry?.qty ?? 1);
+      setTempOpts(mergeWithDefaults(entry?.options ?? {}, item));
+    } else if (item.optionGroups.length === 0) {
+      // 옵션 없는 메뉴: 기존 항목 편집 or 새 항목
+      const existing = cart.find(e => e.itemId === item.id);
+      setModal(item); setEditingKey(existing?.key ?? null);
+      setTempQty(existing?.qty ?? 1);
+      setTempOpts({});
+    } else {
+      // 옵션 있는 메뉴: 항상 새 항목 추가
+      setModal(item); setEditingKey(null);
+      setTempQty(1);
+      setTempOpts(defaultOptions(item));
+    }
   };
 
   const addToCart = () => {
@@ -90,14 +110,17 @@ export default function KioskPage() {
         return;
       }
     }
-    if (tempQty === 0) {
-      const { [modal.id]: _, ...rest } = cart;
-      setCart(rest);
-    } else {
-      setCart(p => ({ ...p, [modal.id]: { qty: tempQty, options: tempOpts } }));
+    if (editingKey) {
+      if (tempQty === 0) setCart(p => p.filter(e => e.key !== editingKey));
+      else setCart(p => p.map(e => e.key === editingKey ? { ...e, qty: tempQty, options: tempOpts } : e));
+    } else if (tempQty > 0) {
+      const key = String(++cartKeyRef.current);
+      setCart(p => [...p, { key, itemId: modal.id, qty: tempQty, options: tempOpts }]);
     }
-    setModal(null);
+    setModal(null); setEditingKey(null);
   };
+
+  const removeCartItem = (key: string) => setCart(p => p.filter(e => e.key !== key));
 
   const handleOrder = async () => {
     if (totalQty === 0 || loading) return;
@@ -106,19 +129,25 @@ export default function KioskPage() {
       const cafeItems: Record<string, number> = {};
       const foodItems: Record<string, number> = {};
       const itemOptions: Record<string, Record<string, Record<string, number>>> = {};
-      for (const [idStr, { qty, options }] of Object.entries(cart)) {
-        const item = menus.find(m => m.id === Number(idStr));
-        if (!item || qty <= 0) continue;
-        if (item.type === 'cafe') cafeItems[item.name] = qty;
-        else foodItems[item.name] = qty;
-        // 그룹 ID 키 → 그룹 이름 키로 변환 (준비대 화면 표시용)
+
+      // 같은 메뉴가 여러 항목일 때 "(2)", "(3)" 접미사
+      const nameCount: Record<string, number> = {};
+      for (const entry of cart) {
+        const item = menus.find(m => m.id === entry.itemId);
+        if (!item || entry.qty <= 0) continue;
+        const base = item.name;
+        nameCount[base] = (nameCount[base] ?? 0) + 1;
+        const name = nameCount[base] > 1 ? `${base} (${nameCount[base]})` : base;
+        if (item.type === 'cafe') cafeItems[name] = entry.qty;
+        else foodItems[name] = entry.qty;
         const namedOpts: Record<string, Record<string, number>> = {};
         for (const g of item.optionGroups) {
-          const sel = options[String(g.id)] ?? {};
+          const sel = entry.options[String(g.id)] ?? {};
           if (Object.values(sel).some(q => q > 0)) namedOpts[g.name || String(g.id)] = sel;
         }
-        if (Object.keys(namedOpts).length > 0) itemOptions[item.name] = namedOpts;
+        if (Object.keys(namedOpts).length > 0) itemOptions[name] = namedOpts;
       }
+
       const res = await fetch('/api/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cafeItems, foodItems, itemOptions }),
@@ -134,7 +163,7 @@ export default function KioskPage() {
     }
   };
 
-  const resetAll = () => { setOrderNum(null); setCart({}); setTotalPaid(0); };
+  const resetAll = () => { setOrderNum(null); setCart([]); setTotalPaid(0); };
 
   // ── 주문 완료 화면 ──
   if (orderNum !== null) {
@@ -166,23 +195,19 @@ export default function KioskPage() {
       const selected = Object.keys(sel).find(k => sel[k] > 0);
       return (
         <div className="grid grid-cols-2 gap-2">
-          {group.options.map(opt => {
-            const isSelected = selected === opt.name;
-            return (
-              <button key={opt.id} type="button"
-                onClick={(e) => { e.preventDefault(); setTempOpts(p => ({ ...p, [gk]: { [opt.name]: 1 } })); }}
-                className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors ${
-                  isSelected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                }`}>
-                <span className="block">{opt.name}</span>
-              </button>
-            );
-          })}
+          {group.options.map(opt => (
+            <button key={opt.id} type="button"
+              onClick={(e) => { e.preventDefault(); setTempOpts(p => ({ ...p, [gk]: { [opt.name]: 1 } })); }}
+              className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors ${
+                selected === opt.name ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
+              }`}>
+              <span className="block">{opt.name}</span>
+            </button>
+          ))}
         </div>
       );
     }
 
-    // 수량 선택 — maxQty > 1
     return (
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-400 px-1 mb-1">
@@ -198,22 +223,12 @@ export default function KioskPage() {
               <span className={`flex-1 text-sm font-medium ${optQty > 0 ? 'text-blue-700' : 'text-slate-600'}`}>{opt.name}</span>
               <div className="flex items-center gap-3">
                 <button type="button"
-                  onClick={(e) => { e.preventDefault(); setTempOpts(p => {
-                    const g = { ...p[gk] };
-                    g[opt.name] = Math.max(0, (g[opt.name] ?? 0) - 1);
-                    return { ...p, [gk]: g };
-                  }); }}
+                  onClick={(e) => { e.preventDefault(); setTempOpts(p => { const g = { ...p[gk] }; g[opt.name] = Math.max(0, (g[opt.name] ?? 0) - 1); return { ...p, [gk]: g }; }); }}
                   disabled={optQty === 0}
                   className="w-8 h-8 rounded-full bg-slate-200 text-xl font-bold flex items-center justify-center disabled:opacity-30">−</button>
                 <span className="text-lg font-black w-5 text-center">{optQty}</span>
                 <button type="button"
-                  onClick={(e) => { e.preventDefault(); setTempOpts(p => {
-                    const g = { ...p[gk] };
-                    const total = Object.values(g).reduce((s, q) => s + q, 0);
-                    if (total >= group.maxQty) return p;
-                    g[opt.name] = (g[opt.name] ?? 0) + 1;
-                    return { ...p, [gk]: g };
-                  }); }}
+                  onClick={(e) => { e.preventDefault(); setTempOpts(p => { const g = { ...p[gk] }; const total = Object.values(g).reduce((s, q) => s + q, 0); if (total >= group.maxQty) return p; g[opt.name] = (g[opt.name] ?? 0) + 1; return { ...p, [gk]: g }; }); }}
                   disabled={totalSel >= group.maxQty}
                   className="w-8 h-8 rounded-full bg-blue-600 text-white text-xl font-bold flex items-center justify-center disabled:opacity-30 active:bg-blue-700">+</button>
               </div>
@@ -226,33 +241,28 @@ export default function KioskPage() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
-      {/* 헤더 */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 shrink-0 flex items-center justify-between">
         <h1 className="text-2xl font-black text-blue-600">주문하기</h1>
         {totalQty > 0 && (
-          <span className="text-sm text-slate-500">{totalQty}개 선택 · <span className="font-bold text-blue-600">{won(totalAmount)}</span></span>
+          <span className="text-sm text-slate-500">{totalQty}개 · <span className="font-bold text-blue-600">{won(totalAmount)}</span></span>
         )}
       </header>
 
-      {/* 메뉴 영역 */}
       <div className="flex flex-1 min-h-0">
-        {/* 카페 */}
         <div className="flex-1 flex flex-col border-r border-slate-200">
           <div className="bg-amber-500 text-white text-center py-2 text-base font-bold shrink-0">☕ 음료</div>
           <div className="flex-1 overflow-y-auto p-3">
             <div className="grid grid-cols-2 gap-2">
-              {cafeMenu.map(item => <MenuCard key={item.id} item={item} cart={cart} onOpen={openModal} />)}
+              {cafeMenu.map(item => <MenuCard key={item.id} item={item} totalQty={itemQty(item.id)} onOpen={() => openModal(item)} />)}
               {cafeMenu.length === 0 && <p className="col-span-2 text-center text-slate-400 py-8">메뉴 없음</p>}
             </div>
           </div>
         </div>
-
-        {/* 음식 */}
         <div className="flex-1 flex flex-col">
           <div className="bg-green-600 text-white text-center py-2 text-base font-bold shrink-0">🍱 음식</div>
           <div className="flex-1 overflow-y-auto p-3">
             <div className="grid grid-cols-2 gap-2">
-              {foodMenu.map(item => <MenuCard key={item.id} item={item} cart={cart} onOpen={openModal} />)}
+              {foodMenu.map(item => <MenuCard key={item.id} item={item} totalQty={itemQty(item.id)} onOpen={() => openModal(item)} />)}
               {foodMenu.length === 0 && <p className="col-span-2 text-center text-slate-400 py-8">메뉴 없음</p>}
             </div>
           </div>
@@ -260,27 +270,55 @@ export default function KioskPage() {
       </div>
 
       {/* 하단 주문 바 */}
-      <div className="shrink-0 p-4 bg-white border-t border-slate-200">
-        <button onClick={handleOrder} disabled={totalQty === 0 || loading}
-          className="w-full py-4 rounded-2xl text-xl font-bold text-white bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed active:bg-blue-700 transition-colors">
-          {loading ? '주문 중...' : totalQty === 0 ? '메뉴를 선택해주세요' : `주문하기 — ${won(totalAmount)}`}
-        </button>
+      <div className="shrink-0 bg-white border-t border-slate-200">
+        {/* 카트 목록 */}
+        {cart.length > 0 && (
+          <div className="max-h-32 overflow-y-auto px-4 pt-3 space-y-1">
+            {cart.map(entry => {
+              const item = menus.find(m => m.id === entry.itemId);
+              if (!item) return null;
+              const optParts = item.optionGroups.map(g => {
+                const sel = entry.options[String(g.id)] ?? {};
+                return Object.entries(sel).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n).join('+');
+              }).filter(Boolean);
+              const hasOpts = item.optionGroups.length > 0;
+              return (
+                <div key={entry.key} className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-1.5">
+                  <span className="flex-1 text-sm text-slate-700 truncate">
+                    {item.name} ×{entry.qty}{optParts.length > 0 ? ` (${optParts.join(' / ')})` : ''}
+                  </span>
+                  <span className="text-sm font-bold text-blue-600 shrink-0">{won(item.price * entry.qty)}</span>
+                  {hasOpts && (
+                    <button type="button" onClick={() => openModal(item, entry.key)}
+                      className="text-slate-400 hover:text-blue-500 text-xs px-1.5 py-0.5 border border-slate-200 rounded shrink-0">수정</button>
+                  )}
+                  <button type="button" onClick={() => removeCartItem(entry.key)}
+                    className="text-slate-300 hover:text-red-400 text-xl font-bold shrink-0 leading-none">×</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="p-4">
+          <button onClick={handleOrder} disabled={totalQty === 0 || loading}
+            className="w-full py-4 rounded-2xl text-xl font-bold text-white bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed active:bg-blue-700 transition-colors">
+            {loading ? '주문 중...' : totalQty === 0 ? '메뉴를 선택해주세요' : `주문하기 — ${won(totalAmount)}`}
+          </button>
+        </div>
       </div>
 
-      {/* ── 메뉴 옵션 모달 ── */}
+      {/* 옵션 모달 */}
       {modal && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl flex flex-col max-h-[85vh]">
-            {/* 모달 헤더 */}
             <div className="px-6 pt-5 pb-4 border-b border-slate-100 flex items-start justify-between shrink-0">
               <div>
                 <h3 className="text-xl font-bold text-slate-800">{modal.name}</h3>
                 <p className="text-base font-bold text-blue-600 mt-0.5">{won(modal.price)}</p>
               </div>
-              <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+              <button type="button" onClick={() => { setModal(null); setEditingKey(null); }} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
             </div>
 
-            {/* 옵션 그룹 */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
               {modal.optionGroups.map(group => (
                 <div key={group.id}>
@@ -288,32 +326,28 @@ export default function KioskPage() {
                     <p className="text-base font-bold text-slate-700">{group.name}</p>
                     {group.required
                       ? <span className="text-xs bg-red-100 text-red-500 px-2 py-0.5 rounded-full">필수</span>
-                      : <span className="text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full">선택</span>
-                    }
+                      : <span className="text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full">선택</span>}
                   </div>
                   {renderGroup(group)}
                 </div>
               ))}
-              {modal.optionGroups.length === 0 && (
-                <p className="text-slate-400 text-sm text-center py-2">옵션 없음</p>
-              )}
+              {modal.optionGroups.length === 0 && <p className="text-slate-400 text-sm text-center py-2">옵션 없음</p>}
             </div>
 
-            {/* 수량 + 담기 */}
             <div className="px-6 py-4 border-t border-slate-100 shrink-0">
               <div className="flex items-center justify-between mb-4">
                 <span className="text-base font-medium text-slate-600">수량</span>
                 <div className="flex items-center gap-4">
-                  <button onClick={() => setTempQty(q => Math.max(0, q - 1))}
+                  <button type="button" onClick={() => setTempQty(q => Math.max(0, q - 1))}
                     className="w-10 h-10 rounded-full bg-slate-100 text-2xl font-bold flex items-center justify-center active:bg-slate-200">−</button>
                   <span className="text-2xl font-black w-8 text-center">{tempQty}</span>
-                  <button onClick={() => setTempQty(q => q + 1)}
+                  <button type="button" onClick={() => setTempQty(q => q + 1)}
                     className="w-10 h-10 rounded-full bg-blue-600 text-white text-2xl font-bold flex items-center justify-center active:bg-blue-700">+</button>
                 </div>
               </div>
-              <button onClick={addToCart}
+              <button type="button" onClick={addToCart}
                 className="w-full py-4 rounded-2xl text-lg font-bold text-white bg-blue-600 active:bg-blue-700">
-                {tempQty === 0 ? '삭제' : `담기 — ${won(modal.price * tempQty)}`}
+                {tempQty === 0 ? '삭제' : editingKey ? `수정 완료 — ${won(modal.price * tempQty)}` : `담기 — ${won(modal.price * tempQty)}`}
               </button>
             </div>
           </div>
