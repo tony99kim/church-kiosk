@@ -239,12 +239,15 @@ function broadcast() {
 export function addClient(fn: SendFn) { state.clients.add(fn); }
 export function removeClient(fn: SendFn) { state.clients.delete(fn); }
 
-function assignSlot(slots: (number | null)[], order: Order, key: 'cafeSlot' | 'foodSlot') {
+type SlotKey = 'cafeSlot' | 'foodSlot' | 'cafePickupSlot' | 'foodPickupSlot';
+type StatusKey = 'cafeStatus' | 'foodStatus';
+
+function assignSlot(slots: (number | null)[], order: Order, key: SlotKey) {
   const i = slots.findIndex(s => s === null);
   if (i >= 0) { slots[i] = order.id; order[key] = i + 1; }
 }
 
-function freeAndReassign(slots: (number | null)[], order: Order, slotKey: 'cafeSlot' | 'foodSlot', statusKey: 'cafeStatus' | 'foodStatus') {
+function freeAndReassign(slots: (number | null)[], order: Order, slotKey: SlotKey, statusKey: StatusKey) {
   if (!order[slotKey]) return;
   slots[order[slotKey]! - 1] = null;
   order[slotKey] = undefined;
