@@ -61,6 +61,9 @@ declare global {
 const db = new Database(
   process.env.DB_PATH ?? path.join(process.cwd(), 'kiosk.db')
 );
+// WAL: 동시 읽기 허용, busy_timeout: 잠금 충돌 시 최대 5초 대기 (빌드 타임 SQLITE_BUSY 방지)
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS orders (
