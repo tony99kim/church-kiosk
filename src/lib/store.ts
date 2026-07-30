@@ -432,7 +432,7 @@ export function getOrdersForExport() {
       .join('; ');
 
     const d = new Date(r.created_at);
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const dateStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
     return { id: r.id, date: dateStr, items: itemsList, options: optionsStr, total };
   });
