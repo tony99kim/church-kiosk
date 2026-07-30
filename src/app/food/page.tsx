@@ -29,7 +29,7 @@ function SlotCard({ slot, order }: { slot: number; order?: Order }) {
     : [];
 
   return (
-    <div className={`rounded-2xl border-2 flex flex-col h-48 ${
+    <div className={`rounded-2xl border-2 flex flex-col min-h-48 ${
       order
         ? isReady
           ? 'bg-blue-50 border-blue-400 shadow-md'
