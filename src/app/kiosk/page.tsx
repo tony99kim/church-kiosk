@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import type { MenuItem } from '@/lib/store';
+import { useOrders } from '@/lib/useOrders';
 
 function won(n: number) { return n.toLocaleString('ko-KR') + '원'; }
 
@@ -34,22 +35,30 @@ function mergeWithDefaults(existing: GroupSel, item: MenuItem): GroupSel {
 
 type MenuCardProps = { item: MenuItem; totalQty: number; onOpen: () => void };
 function MenuCard({ item, totalQty, onOpen }: MenuCardProps) {
+  const soldOut = item.stock === 0;
   const inCart = totalQty > 0;
   return (
-    <button type="button" onClick={onOpen}
-      className={`relative text-left rounded-2xl p-4 border-2 transition-all active:scale-95 ${
-        inCart ? 'border-blue-400 bg-blue-50 shadow-md' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+    <button type="button" onClick={soldOut ? undefined : onOpen} disabled={soldOut}
+      className={`relative text-left rounded-2xl p-4 border-2 transition-all ${
+        soldOut
+          ? 'border-slate-200 bg-slate-100 opacity-60 cursor-not-allowed'
+          : inCart
+            ? 'border-blue-400 bg-blue-50 shadow-md active:scale-95'
+            : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm active:scale-95'
       }`}>
-      {inCart && (
+      {soldOut && (
+        <span className="absolute top-2 right-2 text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">품절</span>
+      )}
+      {inCart && !soldOut && (
         <span className="absolute top-2 right-2 w-6 h-6 bg-blue-600 text-white text-xs font-black rounded-full flex items-center justify-center">
           {totalQty}
         </span>
       )}
-      <p className={`text-base font-semibold leading-snug pr-6 ${inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
-      {item.optionGroups.length > 0 && (
+      <p className={`text-base font-semibold leading-snug pr-8 ${soldOut ? 'text-slate-400 line-through' : inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
+      {item.optionGroups.length > 0 && !soldOut && (
         <p className="text-xs text-blue-400 mt-0.5">옵션 선택</p>
       )}
-      <p className={`text-sm font-bold mt-1 ${inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
+      <p className={`text-sm font-bold mt-1 ${soldOut ? 'text-slate-300' : inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
     </button>
   );
 }
@@ -65,11 +74,18 @@ export default function KioskPage() {
   const [totalPaid, setTotalPaid] = useState(0);
   const [loading, setLoading]   = useState(false);
   const cartKeyRef = useRef(0);
+  const orders = useOrders();
 
   useEffect(() => {
     const load = () => fetch('/api/menu').then(r => r.ok ? r.json() : Promise.reject(r.status)).then(setMenus).catch(() => setTimeout(load, 3000));
     load();
   }, []);
+
+  // 주문이 들어올 때마다 재고 갱신 (품절 반영)
+  useEffect(() => {
+    if (orders.length === 0) return;
+    fetch('/api/menu').then(r => r.json()).then(setMenus).catch(() => {});
+  }, [orders]);
 
   const cafeMenu = menus.filter(m => m.type === 'cafe');
   const foodMenu = menus.filter(m => m.type === 'food');

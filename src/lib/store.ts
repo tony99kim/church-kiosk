@@ -23,6 +23,7 @@ export interface MenuItem {
   type: 'cafe' | 'food';
   price: number;
   sortOrder: number;
+  stock: number | null; // null = 무제한, 0 = 품절
   optionGroups: OptionGroup[];
 }
 
@@ -106,6 +107,7 @@ try { db.exec("ALTER TABLE orders ADD COLUMN item_options TEXT NOT NULL DEFAULT 
 try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN is_set INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE option_groups ADD COLUMN max_qty INTEGER NOT NULL DEFAULT 1'); } catch {}
+try { db.exec('ALTER TABLE menu_items ADD COLUMN stock INTEGER DEFAULT NULL'); } catch {}
 
 // ── 메뉴 옵션 그룹 저장 (replace all) ────────────────────────
 export function saveMenuOptions(
@@ -307,8 +309,13 @@ export function createOrder(
   };
   if (hasCafe) { assignSlot(state.cafeSlots, order, 'cafeSlot'); assignSlot(state.cafePickupSlots, order, 'cafePickupSlot'); }
   if (hasFood) { assignSlot(state.foodSlots, order, 'foodSlot'); assignSlot(state.foodPickupSlots, order, 'foodPickupSlot'); }
-  stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
-    order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions));
+  const stmtDecrStock = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL AND stock > 0');
+  db.transaction(() => {
+    stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
+      order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions));
+    for (const [name, qty] of Object.entries(cafeItems)) if (qty > 0) stmtDecrStock.run(qty, name);
+    for (const [name, qty] of Object.entries(foodItems)) if (qty > 0) stmtDecrStock.run(qty, name);
+  })();
   state.orders.set(order.id, order);
   broadcast();
   return order;
@@ -365,7 +372,7 @@ export function updateOrder(id: number, action: string): boolean {
 }
 
 // ── 메뉴 CRUD ────────────────────────────────────────────────
-type DbMenuRow   = { id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number };
+type DbMenuRow   = { id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number; stock: number | null };
 type DbGroupRow  = { id: number; menu_item_id: number; name: string; required: number; max_qty: number };
 type DbOptionRow = { id: number; group_id: number; name: string; price: number };
 
@@ -385,13 +392,18 @@ export function getMenuItems(): MenuItem[] {
     groupsByItem.get(g.menu_item_id)!.push({ id: g.id, name: g.name, required: g.required === 1, maxQty: g.max_qty ?? 1, options: optsByGroup.get(g.id) ?? [] });
   }
 
-  return items.map(r => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order, optionGroups: groupsByItem.get(r.id) ?? [] }));
+  return items.map(r => ({ id: r.id, name: r.name, type: r.type, price: r.price, sortOrder: r.sort_order, stock: r.stock ?? null, optionGroups: groupsByItem.get(r.id) ?? [] }));
 }
 
-export function addMenuItem(name: string, type: 'cafe' | 'food', price: number): MenuItem {
+export function addMenuItem(name: string, type: 'cafe' | 'food', price: number, stock?: number | null): MenuItem {
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM menu_items WHERE type = ?').get(type) as { next: number }).next;
-  const { lastInsertRowid: id } = db.prepare('INSERT INTO menu_items (name, type, price, sort_order) VALUES (?, ?, ?, ?)').run(name, type, price, maxOrder);
-  return { id: Number(id), name, type, price, sortOrder: maxOrder, optionGroups: [] };
+  const s = stock ?? null;
+  const { lastInsertRowid: id } = db.prepare('INSERT INTO menu_items (name, type, price, sort_order, stock) VALUES (?, ?, ?, ?, ?)').run(name, type, price, maxOrder, s);
+  return { id: Number(id), name, type, price, sortOrder: maxOrder, stock: s, optionGroups: [] };
+}
+
+export function setMenuStock(id: number, stock: number | null): void {
+  db.prepare('UPDATE menu_items SET stock = ? WHERE id = ?').run(stock, id);
 }
 
 export function deleteMenuItem(id: number): boolean {
@@ -420,6 +432,40 @@ export function getStats() {
     } catch {}
   }
   return { totalOrders: rows.length, cafeItems, foodItems };
+}
+
+export function getItemSummary(): { name: string; qty: number; isOption: boolean }[] {
+  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders').all() as Array<{
+    cafe_items: string; food_items: string; item_options: string;
+  }>;
+  const counts: Record<string, { qty: number; isOption: boolean }> = {};
+
+  const add = (name: string, qty: number, isOption: boolean) => {
+    if (!counts[name]) counts[name] = { qty: 0, isOption };
+    counts[name].qty += qty;
+  };
+
+  for (const row of rows) {
+    let cafe: Record<string, number> = {};
+    let food: Record<string, number> = {};
+    let opts: Record<string, unknown> = {};
+    try { cafe = JSON.parse(row.cafe_items); } catch {}
+    try { food = JSON.parse(row.food_items); } catch {}
+    try { opts = JSON.parse(row.item_options || '{}'); } catch {}
+
+    for (const [n, q] of Object.entries(cafe)) if (q > 0) add(n, q, false);
+    for (const [n, q] of Object.entries(food)) if (q > 0) add(n, q, false);
+
+    for (const [, groupMap] of Object.entries(opts)) {
+      if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
+      for (const [, optMap] of Object.entries(groupMap as Record<string, unknown>)) {
+        if (!optMap || typeof optMap !== 'object' || Array.isArray(optMap)) continue;
+        for (const [optName, qty] of Object.entries(optMap as Record<string, number>))
+          if (qty > 0) add(optName, qty, true);
+      }
+    }
+  }
+  return Object.entries(counts).map(([name, { qty, isOption }]) => ({ name, qty, isOption }));
 }
 
 export function getOrdersForExport() {

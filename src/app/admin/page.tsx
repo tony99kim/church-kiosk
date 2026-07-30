@@ -27,6 +27,9 @@ export default function AdminPage() {
   const [newName, setNewName]   = useState('');
   const [newType, setNewType]   = useState<'cafe' | 'food'>('cafe');
   const [newPrice, setNewPrice] = useState('');
+  const [newStock, setNewStock] = useState('');
+  const [editingStockId, setEditingStockId] = useState<number | null>(null);
+  const [editingStockVal, setEditingStockVal] = useState('');
 
   const allOrders = useOrders();
   const activeOrders = allOrders.filter(o =>
@@ -45,11 +48,23 @@ export default function AdminPage() {
 
   const addMenu = async () => {
     if (!newName.trim()) return;
+    const stockVal = newStock.trim() === '' ? null : Number(newStock);
     await fetch('/api/menu', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName.trim(), type: newType, price: Number(newPrice) || 0 }),
+      body: JSON.stringify({ name: newName.trim(), type: newType, price: Number(newPrice) || 0, stock: stockVal }),
     });
-    setNewName(''); setNewPrice(''); loadMenus();
+    setNewName(''); setNewPrice(''); setNewStock(''); loadMenus();
+  };
+
+  const saveStock = async (id: number) => {
+    const val = editingStockVal.trim();
+    const stock = val === '' || val === '무제한' ? null : Number(val);
+    await fetch(`/api/menu/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock }),
+    });
+    setEditingStockId(null);
+    loadMenus();
   };
 
   const deleteMenu = async (id: number) => {
@@ -154,7 +169,11 @@ export default function AdminPage() {
               <input value={newPrice} onChange={e => setNewPrice(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addMenu()}
                 placeholder="가격 (원)" type="number" min="0" step="100"
-                className="w-32 border border-slate-200 rounded-xl px-4 py-3 text-base" />
+                className="w-28 border border-slate-200 rounded-xl px-4 py-3 text-base" />
+              <input value={newStock} onChange={e => setNewStock(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addMenu()}
+                placeholder="수량 (빈칸=무제한)" type="number" min="0"
+                className="w-36 border border-slate-200 rounded-xl px-4 py-3 text-base" />
               <button onClick={addMenu}
                 className="bg-blue-600 text-white px-6 py-3 rounded-xl text-base font-bold hover:bg-blue-700 active:bg-blue-800">
                 추가
@@ -168,18 +187,51 @@ export default function AdminPage() {
                 <h3 className="text-base font-bold mb-3 text-slate-600">{label}</h3>
                 <div className="space-y-2">
                   {items.map(item => (
-                    <div key={item.id} className="flex items-center gap-2 py-2 border-b border-slate-50 last:border-0">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-base font-medium truncate">{item.name}</p>
-                          {item.optionGroups.length > 0 && (
-                            <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full shrink-0">옵션 {item.optionGroups.length}개</span>
-                          )}
+                    <div key={item.id} className="py-2 border-b border-slate-50 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-base font-medium truncate">{item.name}</p>
+                            {item.optionGroups.length > 0 && (
+                              <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full shrink-0">옵션 {item.optionGroups.length}개</span>
+                            )}
+                            {item.stock === 0 && (
+                              <span className="text-xs bg-red-100 text-red-500 px-2 py-0.5 rounded-full shrink-0 font-bold">품절</span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-400">{item.price.toLocaleString('ko-KR')}원</p>
                         </div>
-                        <p className="text-sm text-slate-400">{item.price.toLocaleString('ko-KR')}원</p>
+                        <button onClick={() => openOptions(item)} className="text-slate-400 hover:text-blue-500 text-lg px-1.5" title="옵션 편집">⚙</button>
+                        <button onClick={() => deleteMenu(item.id)} className="text-slate-300 hover:text-red-500 text-xl font-bold px-1">×</button>
                       </div>
-                      <button onClick={() => openOptions(item)} className="text-slate-400 hover:text-blue-500 text-lg px-1.5" title="옵션 편집">⚙</button>
-                      <button onClick={() => deleteMenu(item.id)} className="text-slate-300 hover:text-red-500 text-xl font-bold px-1">×</button>
+                      {/* 재고 행 */}
+                      <div className="flex items-center gap-2 mt-1">
+                        {editingStockId === item.id ? (
+                          <>
+                            <input
+                              type="number" min="0" value={editingStockVal}
+                              onChange={e => setEditingStockVal(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveStock(item.id); if (e.key === 'Escape') setEditingStockId(null); }}
+                              placeholder="수량 (빈칸=무제한)"
+                              autoFocus
+                              className="w-36 border border-blue-300 rounded-lg px-2 py-1 text-sm" />
+                            <button onClick={() => saveStock(item.id)} className="text-xs bg-blue-500 text-white px-2 py-1 rounded-lg font-bold">저장</button>
+                            <button onClick={() => setEditingStockId(null)} className="text-xs text-slate-400 px-1">취소</button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => { setEditingStockId(item.id); setEditingStockVal(item.stock === null ? '' : String(item.stock)); }}
+                            className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+                              item.stock === null
+                                ? 'border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-500'
+                                : item.stock === 0
+                                  ? 'border-red-300 text-red-500 hover:bg-red-50'
+                                  : 'border-green-300 text-green-600 hover:bg-green-50'
+                            }`}>
+                            재고 {item.stock === null ? '무제한' : `${item.stock}개`}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                   {items.length === 0 && <p className="text-slate-400 text-sm py-2">메뉴 없음</p>}
