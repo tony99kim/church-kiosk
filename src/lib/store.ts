@@ -417,21 +417,45 @@ export function deleteMenuItem(id: number): boolean {
 }
 
 // ── 통계 / 내보내기 ──────────────────────────────────────────
+
+// "세트메뉴 (2)" → "세트메뉴" (같은 주문에 여러 조합 담을 때 붙는 접미사 제거)
+function baseName(name: string): string {
+  return name.replace(/ \(\d+\)$/, '');
+}
+
 export function getStats() {
-  const rows = db.prepare('SELECT cafe_items, food_items FROM orders').all() as Array<{ cafe_items: string; food_items: string }>;
+  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders').all() as Array<{
+    cafe_items: string; food_items: string; item_options: string;
+  }>;
   const cafeItems: Record<string, number> = {};
   const foodItems: Record<string, number> = {};
+  const optionItems: Record<string, number> = {};
+
   for (const row of rows) {
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.cafe_items) as Record<string, number>))
-        if (q > 0) cafeItems[n] = (cafeItems[n] ?? 0) + q;
+        if (q > 0) { const k = baseName(n); cafeItems[k] = (cafeItems[k] ?? 0) + q; }
     } catch {}
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.food_items) as Record<string, number>))
-        if (q > 0) foodItems[n] = (foodItems[n] ?? 0) + q;
+        if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; }
+    } catch {}
+    try {
+      const opts = JSON.parse(row.item_options || '{}') as Record<string, unknown>;
+      for (const [, groupMap] of Object.entries(opts)) {
+        if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
+        for (const [, optMap] of Object.entries(groupMap as Record<string, unknown>)) {
+          if (typeof optMap === 'string') {
+            optionItems[optMap] = (optionItems[optMap] ?? 0) + 1;
+          } else if (optMap && typeof optMap === 'object' && !Array.isArray(optMap)) {
+            for (const [optName, qty] of Object.entries(optMap as Record<string, number>))
+              if (qty > 0) optionItems[optName] = (optionItems[optName] ?? 0) + qty;
+          }
+        }
+      }
     } catch {}
   }
-  return { totalOrders: rows.length, cafeItems, foodItems };
+  return { totalOrders: rows.length, cafeItems, foodItems, optionItems };
 }
 
 export function getItemSummary(): { name: string; qty: number; isOption: boolean }[] {
@@ -453,15 +477,19 @@ export function getItemSummary(): { name: string; qty: number; isOption: boolean
     try { food = JSON.parse(row.food_items); } catch {}
     try { opts = JSON.parse(row.item_options || '{}'); } catch {}
 
-    for (const [n, q] of Object.entries(cafe)) if (q > 0) add(n, q, false);
-    for (const [n, q] of Object.entries(food)) if (q > 0) add(n, q, false);
+    for (const [n, q] of Object.entries(cafe)) if (q > 0) add(baseName(n), q, false);
+    for (const [n, q] of Object.entries(food)) if (q > 0) add(baseName(n), q, false);
 
     for (const [, groupMap] of Object.entries(opts)) {
       if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
       for (const [, optMap] of Object.entries(groupMap as Record<string, unknown>)) {
-        if (!optMap || typeof optMap !== 'object' || Array.isArray(optMap)) continue;
-        for (const [optName, qty] of Object.entries(optMap as Record<string, number>))
-          if (qty > 0) add(optName, qty, true);
+        if (typeof optMap === 'string') {
+          // 구 포맷: 그룹 값이 string인 경우
+          add(optMap, 1, true);
+        } else if (optMap && typeof optMap === 'object' && !Array.isArray(optMap)) {
+          for (const [optName, qty] of Object.entries(optMap as Record<string, number>))
+            if (qty > 0) add(optName, qty, true);
+        }
       }
     }
   }

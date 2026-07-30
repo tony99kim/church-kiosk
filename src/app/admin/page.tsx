@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useOrders } from '@/lib/useOrders';
 import type { MenuItem } from '@/lib/store';
 
-interface Stats { totalOrders: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; }
+interface Stats { totalOrders: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; }
 
 type EditGroup = { id?: number; name: string; required: boolean; maxQty: number; options: { id?: number; name: string; price: number }[] };
 
@@ -301,7 +301,7 @@ export default function AdminPage() {
                 <p className="text-7xl font-black text-blue-600 my-2">{stats.totalOrders}</p>
                 <p className="text-slate-500">건</p>
               </div>
-              <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="grid grid-cols-2 gap-4 mb-4">
                 {[{ label: '☕ 카페', items: stats.cafeItems }, { label: '🍱 음식', items: stats.foodItems }].map(({ label, items }) => (
                   <div key={label} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
                     <h3 className="text-base font-bold mb-3 text-slate-600">{label}</h3>
@@ -316,6 +316,19 @@ export default function AdminPage() {
                   </div>
                 ))}
               </div>
+              {Object.keys(stats.optionItems ?? {}).length > 0 && (
+                <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-6">
+                  <h3 className="text-base font-bold mb-3 text-slate-600">🔢 세트 옵션 집계</h3>
+                  <div className="grid grid-cols-2 gap-x-6">
+                    {Object.entries(stats.optionItems).sort(([, a], [, b]) => b - a).map(([name, qty]) => (
+                      <div key={name} className="flex justify-between py-2 border-b border-slate-50">
+                        <span className="text-sm text-slate-700 truncate mr-2">{name}</span>
+                        <span className="text-sm font-bold text-blue-600 shrink-0">{qty}개</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex gap-3">
                 <button onClick={loadStats} className="flex-1 py-4 rounded-2xl bg-slate-100 text-slate-700 text-base font-bold hover:bg-slate-200">새로고침</button>
                 <a href="/api/admin/export" download="orders.csv" className="flex-1 py-4 rounded-2xl bg-green-600 text-white text-base font-bold text-center hover:bg-green-700">📥 CSV 다운로드</a>
