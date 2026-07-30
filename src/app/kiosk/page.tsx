@@ -156,7 +156,7 @@ export default function KioskPage() {
                   isSelected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
                 }`}>
                 <span className="block">{opt.name}</span>
-                {opt.price > 0 && <span className="text-xs text-blue-400">+{won(opt.price)}</span>}
+                {opt.price > 1 && <span className="text-xs text-blue-400">×{opt.price}</span>}
               </button>
             );
           })}

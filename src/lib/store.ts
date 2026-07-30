@@ -211,8 +211,8 @@ function initSlots(orders: Map<number, Order>) {
   const foodPU: (number | null)[] = Array(10).fill(null);
   Array.from(orders.values()).filter(o => o.cafeStatus === 'preparing').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafe[i]   = o.id; o.cafeSlot        = i + 1; });
   Array.from(orders.values()).filter(o => o.foodStatus === 'preparing').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { food[i]   = o.id; o.foodSlot        = i + 1; });
-  Array.from(orders.values()).filter(o => o.cafeStatus === 'ready').    sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafePU[i] = o.id; o.cafePickupSlot  = i + 1; });
-  Array.from(orders.values()).filter(o => o.foodStatus === 'ready').    sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { foodPU[i] = o.id; o.foodPickupSlot  = i + 1; });
+  Array.from(orders.values()).filter(o => o.cafeStatus === 'preparing' || o.cafeStatus === 'ready').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { cafePU[i] = o.id; o.cafePickupSlot  = i + 1; });
+  Array.from(orders.values()).filter(o => o.foodStatus === 'preparing' || o.foodStatus === 'ready').sort((a, b) => a.createdAt - b.createdAt).slice(0, 10).forEach((o, i) => { foodPU[i] = o.id; o.foodPickupSlot  = i + 1; });
   return { cafe, food, cafePU, foodPU };
 }
 
@@ -266,6 +266,16 @@ function freeAndReassign(slots: (number | null)[], order: Order, slotKey: SlotKe
   if (next) assignSlot(slots, next, slotKey);
 }
 
+function freePickupAndReassign(slots: (number | null)[], order: Order, slotKey: 'cafePickupSlot' | 'foodPickupSlot', statusKey: StatusKey) {
+  if (!order[slotKey]) return;
+  slots[order[slotKey]! - 1] = null;
+  order[slotKey] = undefined;
+  const next = Array.from(state.orders.values())
+    .filter(o => (o[statusKey] === 'preparing' || o[statusKey] === 'ready') && !o[slotKey])
+    .sort((a, b) => a.createdAt - b.createdAt)[0];
+  if (next) assignSlot(slots, next, slotKey);
+}
+
 const stmtInsert = db.prepare(
   'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options) VALUES (?, ?, ?, ?, ?, ?, ?)'
 );
@@ -287,8 +297,8 @@ export function createOrder(
     createdAt: Date.now(),
     itemOptions,
   };
-  if (hasCafe) assignSlot(state.cafeSlots, order, 'cafeSlot');
-  if (hasFood) assignSlot(state.foodSlots, order, 'foodSlot');
+  if (hasCafe) { assignSlot(state.cafeSlots, order, 'cafeSlot'); assignSlot(state.cafePickupSlots, order, 'cafePickupSlot'); }
+  if (hasFood) { assignSlot(state.foodSlots, order, 'foodSlot'); assignSlot(state.foodPickupSlots, order, 'foodPickupSlot'); }
   stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
     order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions));
   state.orders.set(order.id, order);
@@ -304,27 +314,27 @@ export function updateOrder(id: number, action: string): boolean {
       if (order.cafeStatus === 'preparing') {
         order.cafeStatus = 'ready';
         freeAndReassign(state.cafeSlots, order, 'cafeSlot', 'cafeStatus');
-        // 수령대 슬롯 배정
-        assignSlot(state.cafePickupSlots, order, 'cafePickupSlot');
+        // 수령대 슬롯은 주문 시 이미 배정됨 — 오버플로우였던 경우만 배정
+        if (!order.cafePickupSlot) assignSlot(state.cafePickupSlots, order, 'cafePickupSlot');
       }
     },
     'food-ready': () => {
       if (order.foodStatus === 'preparing') {
         order.foodStatus = 'ready';
         freeAndReassign(state.foodSlots, order, 'foodSlot', 'foodStatus');
-        assignSlot(state.foodPickupSlots, order, 'foodPickupSlot');
+        if (!order.foodPickupSlot) assignSlot(state.foodPickupSlots, order, 'foodPickupSlot');
       }
     },
     'cafe-pickup': () => {
       if (order.cafeStatus === 'ready') {
         order.cafeStatus = 'picked';
-        freeAndReassign(state.cafePickupSlots, order, 'cafePickupSlot', 'cafeStatus');
+        freePickupAndReassign(state.cafePickupSlots, order, 'cafePickupSlot', 'cafeStatus');
       }
     },
     'food-pickup': () => {
       if (order.foodStatus === 'ready') {
         order.foodStatus = 'picked';
-        freeAndReassign(state.foodPickupSlots, order, 'foodPickupSlot', 'foodStatus');
+        freePickupAndReassign(state.foodPickupSlots, order, 'foodPickupSlot', 'foodStatus');
       }
     },
   } as Record<string, () => void>)[action]?.();
@@ -425,6 +435,41 @@ export function getOrdersForExport() {
 
     return { id: r.id, date: dateStr, items: itemsList, options: optionsStr, total };
   });
+}
+
+export function cancelOrder(id: number): boolean {
+  const order = state.orders.get(id);
+  if (!order) return false;
+
+  const { cafeSlot, foodSlot, cafePickupSlot, foodPickupSlot } = order;
+  if (cafeSlot)        state.cafeSlots[cafeSlot - 1]               = null;
+  if (foodSlot)        state.foodSlots[foodSlot - 1]               = null;
+  if (cafePickupSlot)  state.cafePickupSlots[cafePickupSlot - 1]   = null;
+  if (foodPickupSlot)  state.foodPickupSlots[foodPickupSlot - 1]   = null;
+
+  state.orders.delete(id);
+  db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+
+  // 빈 슬롯에 오버플로우 주문 배정
+  if (cafeSlot) {
+    const next = Array.from(state.orders.values()).filter(o => o.cafeStatus === 'preparing' && !o.cafeSlot).sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (next) assignSlot(state.cafeSlots, next, 'cafeSlot');
+  }
+  if (foodSlot) {
+    const next = Array.from(state.orders.values()).filter(o => o.foodStatus === 'preparing' && !o.foodSlot).sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (next) assignSlot(state.foodSlots, next, 'foodSlot');
+  }
+  if (cafePickupSlot) {
+    const next = Array.from(state.orders.values()).filter(o => (o.cafeStatus === 'preparing' || o.cafeStatus === 'ready') && !o.cafePickupSlot).sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (next) assignSlot(state.cafePickupSlots, next, 'cafePickupSlot');
+  }
+  if (foodPickupSlot) {
+    const next = Array.from(state.orders.values()).filter(o => (o.foodStatus === 'preparing' || o.foodStatus === 'ready') && !o.foodPickupSlot).sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (next) assignSlot(state.foodPickupSlots, next, 'foodPickupSlot');
+  }
+
+  broadcast();
+  return true;
 }
 
 export function resetOrders(): void {
