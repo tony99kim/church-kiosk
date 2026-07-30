@@ -45,7 +45,6 @@ function SlotCard({ slot, order }: { slot: number; order?: Order }) {
             {Object.entries(order.itemOptions ?? {}).map(([, opts]) => formatOptions(opts)).filter(Boolean).map((s, i) => (
               <span key={i} className="text-xs text-blue-500 text-center leading-tight">{s}</span>
             ))}
-            {!isReady && <span className="text-xs text-amber-400 font-bold mt-1">준비 중</span>}
           </div>
           {isReady ? (
             <button onClick={pickup} className="mx-2 mb-2 py-2 rounded-xl bg-blue-500 text-white text-sm font-bold active:bg-blue-600">
