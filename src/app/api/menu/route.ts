@@ -10,6 +10,6 @@ export async function POST(req: NextRequest) {
   if (!name || !['cafe', 'food'].includes(type)) {
     return NextResponse.json({ error: 'invalid' }, { status: 400 });
   }
-  const item = addMenuItem(String(name).trim(), type, Number(price) || 0, Boolean(isSet));
+  const item = addMenuItem(String(name).trim(), type, Number(price) || 0);
   return NextResponse.json(item);
 }
