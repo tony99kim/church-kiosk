@@ -11,13 +11,44 @@ interface CartEntry { qty: number; options: GroupSel; }
 function defaultOptions(item: MenuItem): GroupSel {
   const opts: GroupSel = {};
   for (const g of item.optionGroups) {
-    if (g.maxQty === 1 && g.required && g.options.length > 0) {
-      opts[g.name] = { [g.options[0].name]: 1 };
-    } else {
-      opts[g.name] = {};
-    }
+    // maxQty=1 필수 그룹만 첫 옵션 선택, 나머지는 빈 객체로 초기화
+    opts[g.name] = (g.maxQty === 1 && g.required && g.options.length > 0)
+      ? { [g.options[0].name]: 1 }
+      : {};
   }
   return opts;
+}
+
+// 기존 선택값에 누락된 그룹 키 보완 (그룹 변경 후 초기화 방지)
+function mergeWithDefaults(existing: GroupSel, item: MenuItem): GroupSel {
+  const merged = { ...existing };
+  for (const g of item.optionGroups) {
+    if (!(g.name in merged)) merged[g.name] = {};
+  }
+  return merged;
+}
+
+type MenuCardProps = { item: MenuItem; cart: Record<number, CartEntry>; onOpen: (item: MenuItem) => void };
+function MenuCard({ item, cart, onOpen }: MenuCardProps) {
+  const entry = cart[item.id];
+  const inCart = entry && entry.qty > 0;
+  return (
+    <button type="button" onClick={() => onOpen(item)}
+      className={`relative text-left rounded-2xl p-4 border-2 transition-all active:scale-95 ${
+        inCart ? 'border-blue-400 bg-blue-50 shadow-md' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+      }`}>
+      {inCart && (
+        <span className="absolute top-2 right-2 w-6 h-6 bg-blue-600 text-white text-xs font-black rounded-full flex items-center justify-center">
+          {entry.qty}
+        </span>
+      )}
+      <p className={`text-base font-semibold leading-snug pr-6 ${inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
+      {item.optionGroups.length > 0 && (
+        <p className="text-xs text-blue-400 mt-0.5">옵션 선택</p>
+      )}
+      <p className={`text-sm font-bold mt-1 ${inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
+    </button>
+  );
 }
 
 export default function KioskPage() {
@@ -45,7 +76,9 @@ export default function KioskPage() {
     const existing = cart[item.id];
     setModal(item);
     setTempQty(existing?.qty ?? 1);
-    setTempOpts(existing?.options ?? defaultOptions(item));
+    // 기존 선택 있으면 불러오되, 누락 그룹 키 보완
+    const base = existing?.options ?? defaultOptions(item);
+    setTempOpts(mergeWithDefaults(base, item));
   };
 
   const addToCart = () => {
@@ -119,34 +152,10 @@ export default function KioskPage() {
     );
   }
 
-  // ── 메뉴 카드 ──
-  const MenuCard = ({ item }: { item: MenuItem }) => {
-    const entry = cart[item.id];
-    const inCart = entry && entry.qty > 0;
-    return (
-      <button onClick={() => openModal(item)}
-        className={`relative text-left rounded-2xl p-4 border-2 transition-all active:scale-95 ${
-          inCart ? 'border-blue-400 bg-blue-50 shadow-md' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
-        }`}>
-        {inCart && (
-          <span className="absolute top-2 right-2 w-6 h-6 bg-blue-600 text-white text-xs font-black rounded-full flex items-center justify-center">
-            {entry.qty}
-          </span>
-        )}
-        <p className={`text-base font-semibold leading-snug pr-6 ${inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
-        {item.optionGroups.length > 0 && (
-          <p className="text-xs text-blue-400 mt-0.5">옵션 선택</p>
-        )}
-        <p className={`text-sm font-bold mt-1 ${inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
-      </button>
-    );
-  };
-
   // ── 옵션 그룹 렌더 ──
   const renderGroup = (group: MenuItem['optionGroups'][0]) => {
     const sel = tempOpts[group.name] ?? {};
     const totalSel = Object.values(sel).reduce((s, q) => s + q, 0);
-    const remaining = group.maxQty - totalSel;
 
     if (group.maxQty === 1) {
       // 단일 선택 — 라디오 스타일
@@ -156,13 +165,12 @@ export default function KioskPage() {
           {group.options.map(opt => {
             const isSelected = selected === opt.name;
             return (
-              <button key={opt.id}
-                onClick={() => setTempOpts(p => ({ ...p, [group.name]: { [opt.name]: 1 } }))}
+              <button key={opt.id} type="button"
+                onClick={(e) => { e.preventDefault(); setTempOpts(p => ({ ...p, [group.name]: { [opt.name]: 1 } })); }}
                 className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors ${
                   isSelected ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
                 }`}>
                 <span className="block">{opt.name}</span>
-                {opt.price > 1 && <span className="text-xs text-blue-400">×{opt.price}</span>}
               </button>
             );
           })}
@@ -185,22 +193,25 @@ export default function KioskPage() {
             <div key={opt.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 ${optQty > 0 ? 'border-blue-400 bg-blue-50' : 'border-slate-200'}`}>
               <span className={`flex-1 text-sm font-medium ${optQty > 0 ? 'text-blue-700' : 'text-slate-600'}`}>{opt.name}</span>
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setTempOpts(p => {
+                <button type="button"
+                  onClick={(e) => { e.preventDefault(); setTempOpts(p => {
                     const g = { ...p[group.name] };
                     g[opt.name] = Math.max(0, (g[opt.name] ?? 0) - 1);
                     return { ...p, [group.name]: g };
-                  })}
+                  }); }}
                   disabled={optQty === 0}
                   className="w-8 h-8 rounded-full bg-slate-200 text-xl font-bold flex items-center justify-center disabled:opacity-30">−</button>
                 <span className="text-lg font-black w-5 text-center">{optQty}</span>
-                <button
-                  onClick={() => setTempOpts(p => {
+                <button type="button"
+                  onClick={(e) => { e.preventDefault(); setTempOpts(p => {
                     const g = { ...p[group.name] };
+                    // maxQty 초과 방지 — 빠른 탭에서도 안전
+                    const total = Object.values(g).reduce((s, q) => s + q, 0);
+                    if (total >= group.maxQty) return p;
                     g[opt.name] = (g[opt.name] ?? 0) + 1;
                     return { ...p, [group.name]: g };
-                  })}
-                  disabled={remaining === 0}
+                  }); }}
+                  disabled={totalSel >= group.maxQty}
                   className="w-8 h-8 rounded-full bg-blue-600 text-white text-xl font-bold flex items-center justify-center disabled:opacity-30 active:bg-blue-700">+</button>
               </div>
             </div>
@@ -227,7 +238,7 @@ export default function KioskPage() {
           <div className="bg-amber-500 text-white text-center py-2 text-base font-bold shrink-0">☕ 음료</div>
           <div className="flex-1 overflow-y-auto p-3">
             <div className="grid grid-cols-2 gap-2">
-              {cafeMenu.map(item => <MenuCard key={item.id} item={item} />)}
+              {cafeMenu.map(item => <MenuCard key={item.id} item={item} cart={cart} onOpen={openModal} />)}
               {cafeMenu.length === 0 && <p className="col-span-2 text-center text-slate-400 py-8">메뉴 없음</p>}
             </div>
           </div>
@@ -238,7 +249,7 @@ export default function KioskPage() {
           <div className="bg-green-600 text-white text-center py-2 text-base font-bold shrink-0">🍱 음식</div>
           <div className="flex-1 overflow-y-auto p-3">
             <div className="grid grid-cols-2 gap-2">
-              {foodMenu.map(item => <MenuCard key={item.id} item={item} />)}
+              {foodMenu.map(item => <MenuCard key={item.id} item={item} cart={cart} onOpen={openModal} />)}
               {foodMenu.length === 0 && <p className="col-span-2 text-center text-slate-400 py-8">메뉴 없음</p>}
             </div>
           </div>
