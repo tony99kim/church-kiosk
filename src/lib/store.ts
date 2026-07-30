@@ -464,12 +464,8 @@ export function getItemSummary(): { name: string; qty: number; isOption: boolean
   const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0').all() as Array<{
     cafe_items: string; food_items: string; item_options: string;
   }>;
-  const counts: Record<string, { qty: number; isOption: boolean }> = {};
-
-  const add = (name: string, qty: number, isOption: boolean) => {
-    if (!counts[name]) counts[name] = { qty: 0, isOption };
-    counts[name].qty += qty;
-  };
+  const direct: Record<string, number> = {};
+  const options: Record<string, number> = {};
 
   for (const row of rows) {
     let cafe: Record<string, number> = {};
@@ -479,23 +475,26 @@ export function getItemSummary(): { name: string; qty: number; isOption: boolean
     try { food = JSON.parse(row.food_items); } catch {}
     try { opts = JSON.parse(row.item_options || '{}'); } catch {}
 
-    for (const [n, q] of Object.entries(cafe)) if (q > 0) add(baseName(n), q, false);
-    for (const [n, q] of Object.entries(food)) if (q > 0) add(baseName(n), q, false);
+    for (const [n, q] of Object.entries(cafe)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; }
+    for (const [n, q] of Object.entries(food)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; }
 
     for (const [, groupMap] of Object.entries(opts)) {
       if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
       for (const [, optMap] of Object.entries(groupMap as Record<string, unknown>)) {
         if (typeof optMap === 'string') {
-          // 구 포맷: 그룹 값이 string인 경우
-          add(optMap, 1, true);
+          options[optMap] = (options[optMap] ?? 0) + 1;
         } else if (optMap && typeof optMap === 'object' && !Array.isArray(optMap)) {
           for (const [optName, qty] of Object.entries(optMap as Record<string, number>))
-            if (qty > 0) add(optName, qty, true);
+            if (qty > 0) options[optName] = (options[optName] ?? 0) + qty;
         }
       }
     }
   }
-  return Object.entries(counts).map(([name, { qty, isOption }]) => ({ name, qty, isOption }));
+
+  return [
+    ...Object.entries(direct).map(([name, qty]) => ({ name, qty, isOption: false })),
+    ...Object.entries(options).map(([name, qty]) => ({ name, qty, isOption: true })),
+  ];
 }
 
 export function getOrdersForExport() {
