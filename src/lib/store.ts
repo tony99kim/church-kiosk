@@ -505,7 +505,7 @@ export function getOrdersForExport() {
 
   return rows.map(r => {
     const d = new Date(r.created_at);
-    const dateStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const dateStr = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
     if (r.cancelled) return { id: r.id, date: dateStr, items: '취소', options: '', total: 0 };
 

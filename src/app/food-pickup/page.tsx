@@ -16,7 +16,7 @@ function formatOptions(opts: unknown): string | null {
 }
 
 function SlotCard({ slot, order }: { slot: number; order?: Order }) {
-  const pickup = () => fetch(`/api/orders/${order!.id}/food-pickup`, { method: 'POST' });
+  const pickup = () => order && fetch(`/api/orders/${order.id}/food-pickup`, { method: 'POST' });
   const isReady = order?.foodStatus === 'ready';
 
   const items = order
