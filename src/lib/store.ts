@@ -250,7 +250,12 @@ if (globalThis._kioskState) {
   globalThis._kioskState = state;
 }
 
-export function getOrders(): Order[] { return Array.from(state.orders.values()); }
+export function getOrders(): Order[] {
+  return Array.from(state.orders.values()).filter(o =>
+    !(  (o.cafeStatus === 'picked' || o.cafeStatus === 'none') &&
+        (o.foodStatus === 'picked' || o.foodStatus === 'none')  )
+  );
+}
 
 function broadcast() {
   const data = JSON.stringify(getOrders());
