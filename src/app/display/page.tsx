@@ -31,7 +31,7 @@ function Column({
         </p>
         <p className="text-gray-400 text-base mt-1">{filtered.length}건</p>
       </div>
-      <div className="flex-1 p-5 flex flex-wrap gap-4 content-start overflow-hidden">
+      <div className="flex-1 p-5 flex flex-wrap gap-4 content-start overflow-y-auto">
         {filtered.length === 0 ? (
           <div className="w-full flex items-center justify-center text-gray-600 text-2xl py-12">—</div>
         ) : (
