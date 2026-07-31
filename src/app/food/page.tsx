@@ -70,7 +70,6 @@ function SlotCard({ slot, order }: { slot: number; order?: Order }) {
 function OverflowCard({ order }: { order: Order }) {
   const isReady = order.foodStatus === 'ready';
   const onReady = () => fetch(`/api/orders/${order.id}/food-ready`, { method: 'POST' });
-  const onPickup = () => fetch(`/api/orders/${order.id}/food-pickup`, { method: 'POST' });
 
   const items = Object.entries(order.foodItems).filter(([, n]) => n > 0)
     .map(([name, n]) => n > 1 ? `${name} ×${n}` : name).join(' / ');
@@ -86,9 +85,9 @@ function OverflowCard({ order }: { order: Order }) {
         {optLines.map((s, i) => <p key={i} className="text-sm text-blue-500 truncate">{s}</p>)}
       </div>
       {isReady ? (
-        <button onClick={onPickup} className="shrink-0 px-5 py-2.5 rounded-xl bg-blue-500 text-white text-base font-bold active:bg-blue-600">
-          수령완료
-        </button>
+        <span className="shrink-0 px-5 py-2.5 rounded-xl bg-blue-100 text-blue-500 text-base font-bold">
+          수령 대기 중
+        </span>
       ) : (
         <button onClick={onReady} className="shrink-0 px-5 py-2.5 rounded-xl bg-green-500 text-white text-base font-bold active:bg-green-600">
           준비완료
