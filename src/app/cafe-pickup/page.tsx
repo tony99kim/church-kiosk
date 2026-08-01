@@ -43,7 +43,7 @@ function SlotCard({ slot, order }: { slot: number; order?: Order }) {
             <span className={`text-6xl font-black leading-none ${isReady ? 'text-amber-600' : 'text-amber-300'}`}>{order.id}</span>
             <span className="text-sm text-gray-600 text-center mt-1.5 leading-tight line-clamp-2 font-medium">{items}</span>
             {Object.entries(order.itemOptions ?? {}).map(([, opts]) => formatOptions(opts)).filter(Boolean).map((s, i) => (
-              <span key={i} className="text-xs text-blue-500 text-center leading-tight mt-0.5">{s}</span>
+              <span key={i} className="text-sm font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-center mt-1 leading-snug">{s}</span>
             ))}
           </div>
           {isReady ? (
@@ -78,7 +78,7 @@ function OverflowCard({ order }: { order: Order }) {
       <span className={`text-4xl font-black shrink-0 ${isReady ? 'text-amber-600' : 'text-amber-300'}`}>{order.id}</span>
       <div className="flex-1 min-w-0">
         <p className="text-base font-semibold text-slate-700 truncate">{items}</p>
-        {optLines.map((s, i) => <p key={i} className="text-sm text-blue-500 truncate">{s}</p>)}
+        {optLines.map((s, i) => <p key={i} className="text-sm font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full truncate mt-0.5">{s}</p>)}
       </div>
       {isReady ? (
         <button onClick={onPickup} className="shrink-0 px-5 py-2.5 rounded-xl bg-blue-500 text-white text-base font-bold active:bg-blue-600">
