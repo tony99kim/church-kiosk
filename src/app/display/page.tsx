@@ -15,7 +15,7 @@ function NumberChip({ id, pulse }: { id: number; pulse?: boolean }) {
   );
 }
 
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 15;
 const PAGE_INTERVAL = 10000;
 
 function Column({
