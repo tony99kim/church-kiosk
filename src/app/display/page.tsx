@@ -1,4 +1,5 @@
 'use client';
+import { useState, useEffect } from 'react';
 import { useOrders } from '@/lib/useOrders';
 import type { Order } from '@/lib/store';
 
@@ -14,6 +15,9 @@ function NumberChip({ id, pulse }: { id: number; pulse?: boolean }) {
   );
 }
 
+const PAGE_SIZE = 9;
+const PAGE_INTERVAL = 10000;
+
 function Column({
   orders, statusKey, isReady,
 }: {
@@ -22,6 +26,20 @@ function Column({
   isReady: boolean;
 }) {
   const filtered = orders.filter(o => o[statusKey] === (isReady ? 'ready' : 'preparing'));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    if (page >= totalPages) setPage(0);
+  }, [totalPages, page]);
+
+  useEffect(() => {
+    if (totalPages <= 1) return;
+    const t = setInterval(() => setPage(p => (p + 1) % totalPages), PAGE_INTERVAL);
+    return () => clearInterval(t);
+  }, [totalPages]);
+
+  const visible = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
@@ -31,13 +49,20 @@ function Column({
         </p>
         <p className="text-gray-400 text-base mt-1">{filtered.length}건</p>
       </div>
-      <div className="flex-1 p-5 flex flex-wrap gap-4 content-start overflow-y-auto">
-        {filtered.length === 0 ? (
+      <div className="flex-1 p-5 flex flex-wrap gap-4 content-start overflow-hidden">
+        {visible.length === 0 ? (
           <div className="w-full flex items-center justify-center text-gray-600 text-2xl py-12">—</div>
         ) : (
-          filtered.map(o => <NumberChip key={o.id} id={o.id} pulse={isReady} />)
+          visible.map(o => <NumberChip key={o.id} id={o.id} pulse={isReady} />)
         )}
       </div>
+      {totalPages > 1 && (
+        <div className="flex justify-center gap-2 py-3">
+          {Array.from({ length: totalPages }, (_, i) => (
+            <div key={i} className={`w-2 h-2 rounded-full ${i === page ? 'bg-white' : 'bg-gray-600'}`} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
