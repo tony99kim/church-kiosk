@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createOrder } from '@/lib/store';
 
 export async function POST(req: NextRequest) {
-  let body: { cafeItems?: unknown; foodItems?: unknown; itemOptions?: unknown };
+  let body: { cafeItems?: unknown; foodItems?: unknown; itemOptions?: unknown; paymentMethod?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
 
   let order;
   try {
-    order = createOrder(cafeItems, foodItems, itemOptions);
+    const paymentMethod = body.paymentMethod === 'transfer' ? 'transfer' : 'cash';
+    order = createOrder(cafeItems, foodItems, itemOptions, paymentMethod);
   } catch (e) {
     const msg = e instanceof Error ? e.message : '';
     if (msg.startsWith('sold_out:')) {

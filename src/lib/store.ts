@@ -41,6 +41,7 @@ export interface Order {
   foodPickupSlot?: number;  // 음식 수령대 (1-10)
   // itemName → groupName → { optionName: qty }
   itemOptions: Record<string, Record<string, Record<string, number>>>;
+  paymentMethod: 'cash' | 'transfer';
 }
 
 type SendFn = (data: string) => void;
@@ -112,6 +113,7 @@ try { db.exec('ALTER TABLE menu_items ADD COLUMN is_set INTEGER NOT NULL DEFAULT
 try { db.exec('ALTER TABLE option_groups ADD COLUMN max_qty INTEGER NOT NULL DEFAULT 1'); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN stock INTEGER DEFAULT NULL'); } catch {}
 try { db.exec('ALTER TABLE option_items ADD COLUMN linked_menu_item_id INTEGER DEFAULT NULL'); } catch {}
+try { db.exec("ALTER TABLE orders ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash'"); } catch {}
 
 // ── 메뉴 옵션 그룹 저장 (replace all) ────────────────────────
 export function saveMenuOptions(
@@ -172,6 +174,7 @@ if (setMenuItem) {
 type DbRow = {
   id: number; cafe_items: string; food_items: string;
   cafe_status: Status; food_status: Status; created_at: number; item_options: string; cancelled: number;
+  payment_method: 'cash' | 'transfer';
 };
 
 function loadFromDb(): Map<number, Order> {
@@ -208,6 +211,7 @@ function loadFromDb(): Map<number, Order> {
       foodStatus: r.food_status,
       createdAt: r.created_at,
       itemOptions,
+      paymentMethod: r.payment_method ?? 'cash',
     });
   }
   return map;
@@ -296,7 +300,7 @@ function freePickupAndReassign(slots: (number | null)[], order: Order, slotKey: 
 }
 
 const stmtInsert = db.prepare(
-  'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
 );
 const stmtUpdate = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
 
@@ -306,7 +310,8 @@ const stmtGetLinkedItem = db.prepare('SELECT mi.name FROM option_items oi JOIN m
 export function createOrder(
   cafeItems: Record<string, number>,
   foodItems: Record<string, number>,
-  itemOptions: Record<string, Record<string, Record<string, number>>> = {}
+  itemOptions: Record<string, Record<string, Record<string, number>>> = {},
+  paymentMethod: 'cash' | 'transfer' = 'cash'
 ): Order {
   // "(2)", "(3)" 접미사를 제거해 base name 기준으로 수량 합산 후 재고 체크
   const qtyByBase: Record<string, number> = {};
@@ -344,13 +349,14 @@ export function createOrder(
     foodStatus: hasFood ? 'preparing' : 'none',
     createdAt: Date.now(),
     itemOptions,
+    paymentMethod,
   };
   if (hasCafe) { assignSlot(state.cafeSlots, order, 'cafeSlot'); assignSlot(state.cafePickupSlots, order, 'cafePickupSlot'); }
   if (hasFood) { assignSlot(state.foodSlots, order, 'foodSlot'); assignSlot(state.foodPickupSlots, order, 'foodPickupSlot'); }
   const stmtDecrStock = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL AND stock > 0');
   db.transaction(() => {
     stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
-      order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions));
+      order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions), paymentMethod);
     for (const [base, total] of Object.entries(qtyByBase)) stmtDecrStock.run(total, base);
   })();
   state.orders.set(order.id, order);
@@ -542,7 +548,8 @@ export function getOrdersForExport() {
     const d = new Date(r.created_at);
     const dateStr = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
-    if (r.cancelled) return { id: r.id, date: dateStr, items: '취소', options: '', total: 0 };
+    const payment = r.payment_method === 'transfer' ? '계좌이체' : '현금';
+    if (r.cancelled) return { id: r.id, date: dateStr, items: '취소', options: '', total: 0, payment };
 
     let cafeItems: Record<string, number> = {};
     let foodItems: Record<string, number> = {};
@@ -572,7 +579,7 @@ export function getOrdersForExport() {
       }).filter(Boolean).join(', '))
       .join('; ');
 
-    return { id: r.id, date: dateStr, items: itemsList, options: optionsStr, total };
+    return { id: r.id, date: dateStr, items: itemsList, options: optionsStr, total, payment };
   });
 }
 

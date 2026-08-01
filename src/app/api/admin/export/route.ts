@@ -15,9 +15,9 @@ export async function GET() {
     '',
   ].join('\n');
 
-  const detailHeader = '[주문 상세]\n주문번호,시각,주문내역,옵션,합계금액';
+  const detailHeader = '[주문 상세]\n주문번호,시각,주문내역,옵션,합계금액,결제방식';
   const detailBody = rows
-    .map(r => [r.id, r.date, `"${r.items}"`, `"${r.options}"`, r.total].join(','))
+    .map(r => [r.id, r.date, `"${r.items}"`, `"${r.options}"`, r.total, r.payment].join(','))
     .join('\n');
 
   const csv = `﻿${summarySection}\n${detailHeader}\n${detailBody}`;

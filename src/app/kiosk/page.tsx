@@ -76,6 +76,7 @@ export default function KioskPage() {
   const [orderNum, setOrderNum] = useState<number | null>(null);
   const [totalPaid, setTotalPaid] = useState(0);
   const [loading, setLoading]   = useState(false);
+  const [paymentModal, setPaymentModal] = useState(false);
   const cartKeyRef = useRef(0);
   const orders = useOrders();
 
@@ -144,7 +145,8 @@ export default function KioskPage() {
 
   const removeCartItem = (key: string) => setCart(p => p.filter(e => e.key !== key));
 
-  const handleOrder = async () => {
+  const handleOrder = async (paymentMethod: 'cash' | 'transfer') => {
+    setPaymentModal(false);
     if (totalQty === 0 || loading) return;
     setLoading(true);
     try {
@@ -172,7 +174,7 @@ export default function KioskPage() {
 
       const res = await fetch('/api/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cafeItems, foodItems, itemOptions }),
+        body: JSON.stringify({ cafeItems, foodItems, itemOptions, paymentMethod }),
       });
       if (res.status === 409) {
         const data = await res.json();
@@ -353,12 +355,37 @@ export default function KioskPage() {
           </div>
         )}
         <div className="p-4">
-          <button onClick={handleOrder} disabled={totalQty === 0 || loading}
+          <button onClick={() => { if (totalQty > 0 && !loading) setPaymentModal(true); }}
+            disabled={totalQty === 0 || loading}
             className="w-full py-4 rounded-2xl text-xl font-bold text-white bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed active:bg-blue-700 transition-colors">
             {loading ? '주문 중...' : totalQty === 0 ? '메뉴를 선택해주세요' : `주문하기 — ${won(totalAmount)}`}
           </button>
         </div>
       </div>
+
+      {/* 결제 방식 선택 모달 */}
+      {paymentModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6">
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl p-8">
+            <h2 className="text-2xl font-black text-slate-800 text-center mb-2">결제 방식</h2>
+            <p className="text-slate-400 text-center text-base mb-8">결제 방법을 선택해주세요</p>
+            <div className="flex flex-col gap-4">
+              <button onClick={() => handleOrder('cash')}
+                className="w-full py-5 rounded-2xl bg-blue-600 text-white text-2xl font-black active:bg-blue-700">
+                💵 현금결제
+              </button>
+              <button onClick={() => handleOrder('transfer')}
+                className="w-full py-5 rounded-2xl bg-green-600 text-white text-2xl font-black active:bg-green-700">
+                📱 계좌이체
+              </button>
+            </div>
+            <button onClick={() => setPaymentModal(false)}
+              className="w-full mt-4 py-3 text-slate-400 text-base font-medium">
+              취소
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 옵션 모달 */}
       {modal && (
