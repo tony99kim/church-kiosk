@@ -5,7 +5,7 @@ import type { MenuItem } from '@/lib/store';
 
 interface Stats { totalOrders: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; }
 
-type EditGroup = { id?: number; name: string; required: boolean; maxQty: number; options: { id?: number; name: string; price: number }[] };
+type EditGroup = { id?: number; name: string; required: boolean; maxQty: number; options: { id?: number; name: string; price: number; linkedMenuItemId?: number | null }[] };
 
 function formatOpts(opts: unknown): string {
   if (!opts || typeof opts !== 'object' || Array.isArray(opts)) return '';
@@ -82,7 +82,7 @@ export default function AdminPage() {
     setOptItem(item);
     setEditGroups(item.optionGroups.map(g => ({
       id: g.id, name: g.name, required: g.required, maxQty: g.maxQty,
-      options: g.options.map(o => ({ id: o.id, name: o.name, price: o.price })),
+      options: g.options.map(o => ({ id: o.id, name: o.name, price: o.price, linkedMenuItemId: o.linkedMenuItemId ?? null })),
     })));
   };
 
@@ -114,7 +114,7 @@ export default function AdminPage() {
     setEditGroups(p => p.map((g, i) => i === gi ? { ...g, options: [...g.options, { name: '', price: 0 }] } : g));
   const removeOption = (gi: number, oi: number) =>
     setEditGroups(p => p.map((g, i) => i === gi ? { ...g, options: g.options.filter((_, j) => j !== oi) } : g));
-  const updateOption = (gi: number, oi: number, key: 'name' | 'price', val: string | number) =>
+  const updateOption = (gi: number, oi: number, key: 'name' | 'price' | 'linkedMenuItemId', val: string | number | null) =>
     setEditGroups(p => p.map((g, i) => i === gi
       ? { ...g, options: g.options.map((o, j) => j === oi ? { ...o, [key]: val } : o) }
       : g));
@@ -380,6 +380,13 @@ export default function AdminPage() {
                       <div key={oi} className="flex items-center gap-2">
                         <input value={opt.name} onChange={e => updateOption(gi, oi, 'name', e.target.value)}
                           placeholder="옵션 이름" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                        <select
+                          value={opt.linkedMenuItemId ?? ''}
+                          onChange={e => updateOption(gi, oi, 'linkedMenuItemId', e.target.value ? Number(e.target.value) : null)}
+                          className="border border-slate-200 rounded-lg px-2 py-2 text-xs text-slate-500 max-w-32">
+                          <option value="">연동 없음</option>
+                          {menus.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
                         <button onClick={() => removeOption(gi, oi)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
                       </div>
                     ))}

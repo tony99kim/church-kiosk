@@ -7,6 +7,7 @@ export interface OptionItem {
   id: number;
   name: string;
   price: number;
+  linkedMenuItemId?: number | null;
 }
 
 export interface OptionGroup {
@@ -110,11 +111,12 @@ try { db.exec('ALTER TABLE menu_items ADD COLUMN price INTEGER NOT NULL DEFAULT 
 try { db.exec('ALTER TABLE menu_items ADD COLUMN is_set INTEGER NOT NULL DEFAULT 0'); } catch {}
 try { db.exec('ALTER TABLE option_groups ADD COLUMN max_qty INTEGER NOT NULL DEFAULT 1'); } catch {}
 try { db.exec('ALTER TABLE menu_items ADD COLUMN stock INTEGER DEFAULT NULL'); } catch {}
+try { db.exec('ALTER TABLE option_items ADD COLUMN linked_menu_item_id INTEGER DEFAULT NULL'); } catch {}
 
 // ── 메뉴 옵션 그룹 저장 (replace all) ────────────────────────
 export function saveMenuOptions(
   menuItemId: number,
-  groups: Array<{ name: string; required: boolean; maxQty?: number; options: Array<{ name: string; price: number }> }>
+  groups: Array<{ name: string; required: boolean; maxQty?: number; options: Array<{ name: string; price: number; linkedMenuItemId?: number | null }> }>
 ): void {
   db.transaction(() => {
     const gids = (db.prepare('SELECT id FROM option_groups WHERE menu_item_id = ?').all(menuItemId) as { id: number }[]).map(r => r.id);
@@ -122,11 +124,11 @@ export function saveMenuOptions(
     db.prepare('DELETE FROM option_groups WHERE menu_item_id = ?').run(menuItemId);
 
     const insGroup = db.prepare('INSERT INTO option_groups (menu_item_id, name, required, max_qty, sort_order) VALUES (?, ?, ?, ?, ?)');
-    const insItem  = db.prepare('INSERT INTO option_items  (group_id, name, price, sort_order) VALUES (?, ?, ?, ?)');
+    const insItem  = db.prepare('INSERT INTO option_items  (group_id, name, price, sort_order, linked_menu_item_id) VALUES (?, ?, ?, ?, ?)');
 
     groups.forEach((g, gi) => {
       const { lastInsertRowid: gid } = insGroup.run(menuItemId, g.name, g.required ? 1 : 0, g.maxQty ?? 1, gi);
-      g.options.forEach((o, oi) => insItem.run(gid, o.name, o.price, oi));
+      g.options.forEach((o, oi) => insItem.run(gid, o.name, o.price, oi, o.linkedMenuItemId ?? null));
     });
   })();
 }
@@ -298,7 +300,8 @@ const stmtInsert = db.prepare(
 );
 const stmtUpdate = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
 
-const stmtGetStock = db.prepare('SELECT stock FROM menu_items WHERE name = ? AND stock IS NOT NULL');
+const stmtGetStock      = db.prepare('SELECT stock FROM menu_items WHERE name = ? AND stock IS NOT NULL');
+const stmtGetLinkedItem = db.prepare('SELECT mi.name FROM option_items oi JOIN menu_items mi ON oi.linked_menu_item_id = mi.id WHERE oi.name = ?');
 
 export function createOrder(
   cafeItems: Record<string, number>,
@@ -312,6 +315,20 @@ export function createOrder(
     const base = baseName(name);
     qtyByBase[base] = (qtyByBase[base] ?? 0) + qty;
   }
+  // 옵션에 연동된 메뉴 아이템 재고도 합산
+  for (const [itemName, groupMap] of Object.entries(itemOptions)) {
+    const parentQty = (cafeItems[itemName] ?? 0) + (foodItems[itemName] ?? 0);
+    if (parentQty <= 0 || !groupMap) continue;
+    for (const optMap of Object.values(groupMap as Record<string, Record<string, number>>)) {
+      if (!optMap) continue;
+      for (const [optName, optQty] of Object.entries(optMap)) {
+        if (optQty <= 0) continue;
+        const linked = stmtGetLinkedItem.get(optName) as { name: string } | undefined;
+        if (linked) qtyByBase[linked.name] = (qtyByBase[linked.name] ?? 0) + parentQty * optQty;
+      }
+    }
+  }
+
   for (const [base, total] of Object.entries(qtyByBase)) {
     const row = stmtGetStock.get(base) as { stock: number } | undefined;
     if (row && row.stock < total) throw new Error(`sold_out:${base}`);
@@ -394,7 +411,7 @@ export function updateOrder(id: number, action: string): boolean {
 // ── 메뉴 CRUD ────────────────────────────────────────────────
 type DbMenuRow   = { id: number; name: string; type: 'cafe' | 'food'; price: number; sort_order: number; stock: number | null };
 type DbGroupRow  = { id: number; menu_item_id: number; name: string; required: number; max_qty: number };
-type DbOptionRow = { id: number; group_id: number; name: string; price: number };
+type DbOptionRow = { id: number; group_id: number; name: string; price: number; linked_menu_item_id: number | null };
 
 export function getMenuItems(): MenuItem[] {
   const items      = db.prepare('SELECT * FROM menu_items ORDER BY type, sort_order, id').all() as DbMenuRow[];
@@ -404,7 +421,7 @@ export function getMenuItems(): MenuItem[] {
   const optsByGroup = new Map<number, OptionItem[]>();
   for (const o of allOptions) {
     if (!optsByGroup.has(o.group_id)) optsByGroup.set(o.group_id, []);
-    optsByGroup.get(o.group_id)!.push({ id: o.id, name: o.name, price: o.price });
+    optsByGroup.get(o.group_id)!.push({ id: o.id, name: o.name, price: o.price, linkedMenuItemId: o.linked_menu_item_id ?? null });
   }
   const groupsByItem = new Map<number, OptionGroup[]>();
   for (const g of allGroups) {
@@ -575,6 +592,19 @@ export function cancelOrder(id: number): boolean {
     db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?').run(id);
     for (const [name, qty] of Object.entries(order.cafeItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
     for (const [name, qty] of Object.entries(order.foodItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
+    // 옵션에 연동된 메뉴 아이템 재고 복원
+    for (const [itemName, groupMap] of Object.entries(order.itemOptions ?? {})) {
+      const parentQty = (order.cafeItems[itemName] ?? 0) + (order.foodItems[itemName] ?? 0);
+      if (parentQty <= 0 || !groupMap) continue;
+      for (const optMap of Object.values(groupMap as Record<string, Record<string, number>>)) {
+        if (!optMap) continue;
+        for (const [optName, optQty] of Object.entries(optMap)) {
+          if (optQty <= 0) continue;
+          const linked = stmtGetLinkedItem.get(optName) as { name: string } | undefined;
+          if (linked) stmtRestoreStock.run(parentQty * optQty, linked.name);
+        }
+      }
+    }
   })();
 
   // 빈 슬롯에 오버플로우 주문 배정
