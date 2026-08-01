@@ -59,6 +59,9 @@ function MenuCard({ item, totalQty, onOpen }: MenuCardProps) {
         <p className="text-xs text-blue-400 mt-0.5">옵션 선택</p>
       )}
       <p className={`text-sm font-bold mt-1 ${soldOut ? 'text-slate-300' : inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
+      {item.stock !== null && item.stock > 0 && (
+        <p className="text-xs text-orange-500 font-bold mt-0.5">잔여 {item.stock}개</p>
+      )}
     </button>
   );
 }
