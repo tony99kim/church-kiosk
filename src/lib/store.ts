@@ -298,11 +298,19 @@ const stmtInsert = db.prepare(
 );
 const stmtUpdate = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
 
+const stmtGetStock = db.prepare('SELECT stock FROM menu_items WHERE name = ? AND stock IS NOT NULL');
+
 export function createOrder(
   cafeItems: Record<string, number>,
   foodItems: Record<string, number>,
   itemOptions: Record<string, Record<string, Record<string, number>>> = {}
 ): Order {
+  for (const [name, qty] of Object.entries({ ...cafeItems, ...foodItems })) {
+    if (qty <= 0) continue;
+    const row = stmtGetStock.get(name) as { stock: number } | undefined;
+    if (row && row.stock < qty) throw new Error(`sold_out:${name}`);
+  }
+
   const hasCafe = Object.values(cafeItems).some(v => v > 0);
   const hasFood = Object.values(foodItems).some(v => v > 0);
   const order: Order = {

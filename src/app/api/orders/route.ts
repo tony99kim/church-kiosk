@@ -20,6 +20,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'empty order' }, { status: 400 });
   }
 
-  const order = createOrder(cafeItems, foodItems, itemOptions);
+  let order;
+  try {
+    order = createOrder(cafeItems, foodItems, itemOptions);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '';
+    if (msg.startsWith('sold_out:')) {
+      const name = msg.slice('sold_out:'.length);
+      return NextResponse.json({ error: 'sold_out', name }, { status: 409 });
+    }
+    throw e;
+  }
   return NextResponse.json(order);
 }

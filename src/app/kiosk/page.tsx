@@ -171,6 +171,17 @@ export default function KioskPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cafeItems, foodItems, itemOptions }),
       });
+      if (res.status === 409) {
+        const data = await res.json();
+        const freshMenus = await fetch('/api/menu').then(r => r.json()).catch(() => null);
+        if (freshMenus) setMenus(freshMenus);
+        setCart(p => p.filter(e => {
+          const item = menus.find(m => m.id === e.itemId);
+          return item?.name !== data.name;
+        }));
+        alert(`"${data.name}"이(가) 방금 품절되었습니다. 장바구니에서 제거했습니다.`);
+        return;
+      }
       if (!res.ok) throw new Error(`서버 오류: ${res.status}`);
       const data = await res.json();
       setTotalPaid(totalAmount);
