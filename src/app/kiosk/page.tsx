@@ -368,6 +368,7 @@ export default function KioskPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6">
           <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl p-8">
             <h2 className="text-2xl font-black text-slate-800 text-center mb-2">결제 방식</h2>
+            <p className="text-3xl font-black text-blue-600 text-center mb-1">{won(totalAmount)}</p>
             <p className="text-slate-400 text-center text-base mb-8">결제 방법을 선택해주세요</p>
             <div className="flex flex-col gap-4">
               <button onClick={() => handleOrder('cash')}
