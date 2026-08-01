@@ -228,15 +228,26 @@ export default function KioskPage() {
       const selected = Object.keys(sel).find(k => sel[k] > 0);
       return (
         <div className="grid grid-cols-2 gap-2">
-          {group.options.map(opt => (
-            <button key={opt.id} type="button"
-              onClick={(e) => { e.preventDefault(); setTempOpts(p => ({ ...p, [gk]: { [opt.name]: 1 } })); }}
-              className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors ${
-                selected === opt.name ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
-              }`}>
-              <span className="block">{opt.name}</span>
-            </button>
-          ))}
+          {group.options.map(opt => {
+            const linkedItem = opt.linkedMenuItemId ? menus.find(m => m.id === opt.linkedMenuItemId) : null;
+            const linkedSoldOut = linkedItem?.stock === 0;
+            return (
+              <button key={opt.id} type="button"
+                onClick={(e) => { e.preventDefault(); if (!linkedSoldOut) setTempOpts(p => ({ ...p, [gk]: { [opt.name]: 1 } })); }}
+                disabled={linkedSoldOut}
+                className={`py-3 px-4 rounded-xl text-sm font-medium border-2 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  linkedSoldOut ? 'border-slate-200 bg-slate-50' :
+                  selected === opt.name ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                }`}>
+                <span className="block">{opt.name}</span>
+                {linkedItem?.stock !== null && linkedItem?.stock !== undefined && (
+                  <span className={`text-xs font-bold mt-0.5 block ${linkedItem.stock === 0 ? 'text-red-500' : 'text-orange-500'}`}>
+                    {linkedItem.stock === 0 ? '품절' : `잔여 ${linkedItem.stock}개`}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       );
     }
@@ -251,9 +262,18 @@ export default function KioskPage() {
         </div>
         {group.options.map(opt => {
           const optQty = sel[opt.name] ?? 0;
+          const linkedItem = opt.linkedMenuItemId ? menus.find(m => m.id === opt.linkedMenuItemId) : null;
+          const linkedSoldOut = linkedItem?.stock === 0;
           return (
-            <div key={opt.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 ${optQty > 0 ? 'border-blue-400 bg-blue-50' : 'border-slate-200'}`}>
-              <span className={`flex-1 text-sm font-medium ${optQty > 0 ? 'text-blue-700' : 'text-slate-600'}`}>{opt.name}</span>
+            <div key={opt.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 ${linkedSoldOut ? 'border-slate-200 bg-slate-50 opacity-60' : optQty > 0 ? 'border-blue-400 bg-blue-50' : 'border-slate-200'}`}>
+              <div className="flex-1 min-w-0">
+                <span className={`text-sm font-medium ${optQty > 0 ? 'text-blue-700' : 'text-slate-600'}`}>{opt.name}</span>
+                {linkedItem?.stock !== null && linkedItem?.stock !== undefined && (
+                  <span className={`block text-xs font-bold mt-0.5 ${linkedItem.stock === 0 ? 'text-red-500' : 'text-orange-500'}`}>
+                    {linkedItem.stock === 0 ? '품절' : `잔여 ${linkedItem.stock}개`}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-3">
                 <button type="button"
                   onClick={(e) => { e.preventDefault(); setTempOpts(p => { const g = { ...p[gk] }; g[opt.name] = Math.max(0, (g[opt.name] ?? 0) - 1); return { ...p, [gk]: g }; }); }}
@@ -262,7 +282,7 @@ export default function KioskPage() {
                 <span className="text-lg font-black w-5 text-center">{optQty}</span>
                 <button type="button"
                   onClick={(e) => { e.preventDefault(); setTempOpts(p => { const g = { ...p[gk] }; const total = Object.values(g).reduce((s, q) => s + q, 0); if (total >= group.maxQty) return p; g[opt.name] = (g[opt.name] ?? 0) + 1; return { ...p, [gk]: g }; }); }}
-                  disabled={totalSel >= group.maxQty}
+                  disabled={totalSel >= group.maxQty || linkedSoldOut}
                   className="w-8 h-8 rounded-full bg-blue-600 text-white text-xl font-bold flex items-center justify-center disabled:opacity-30 active:bg-blue-700">+</button>
               </div>
             </div>
