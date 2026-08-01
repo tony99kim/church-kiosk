@@ -305,10 +305,16 @@ export function createOrder(
   foodItems: Record<string, number>,
   itemOptions: Record<string, Record<string, Record<string, number>>> = {}
 ): Order {
+  // "(2)", "(3)" 접미사를 제거해 base name 기준으로 수량 합산 후 재고 체크
+  const qtyByBase: Record<string, number> = {};
   for (const [name, qty] of Object.entries({ ...cafeItems, ...foodItems })) {
     if (qty <= 0) continue;
-    const row = stmtGetStock.get(name) as { stock: number } | undefined;
-    if (row && row.stock < qty) throw new Error(`sold_out:${name}`);
+    const base = baseName(name);
+    qtyByBase[base] = (qtyByBase[base] ?? 0) + qty;
+  }
+  for (const [base, total] of Object.entries(qtyByBase)) {
+    const row = stmtGetStock.get(base) as { stock: number } | undefined;
+    if (row && row.stock < total) throw new Error(`sold_out:${base}`);
   }
 
   const hasCafe = Object.values(cafeItems).some(v => v > 0);
@@ -328,8 +334,7 @@ export function createOrder(
   db.transaction(() => {
     stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
       order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions));
-    for (const [name, qty] of Object.entries(cafeItems)) if (qty > 0) stmtDecrStock.run(qty, name);
-    for (const [name, qty] of Object.entries(foodItems)) if (qty > 0) stmtDecrStock.run(qty, name);
+    for (const [base, total] of Object.entries(qtyByBase)) stmtDecrStock.run(total, base);
   })();
   state.orders.set(order.id, order);
   broadcast();
