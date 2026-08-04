@@ -463,14 +463,15 @@ export function editOrder(
   const order = state.orders.get(id);
   if (!order) return false;
 
-  // linked option item qty 계산 헬퍼
+  // cancelOrder/createOrder와 동일한 패턴: cafe+food 합산
   const linkedQtys = (
-    items: Record<string, number>,
+    cafeItems: Record<string, number>,
+    foodItems: Record<string, number>,
     opts: Record<string, Record<string, Record<string, number>>>
   ): Record<string, number> => {
     const result: Record<string, number> = {};
     for (const [itemName, groupMap] of Object.entries(opts)) {
-      const parentQty = (items[itemName] ?? 0);
+      const parentQty = (cafeItems[itemName] ?? 0) + (foodItems[itemName] ?? 0);
       if (parentQty <= 0) continue;
       for (const optMap of Object.values(groupMap)) {
         for (const [optName, optQty] of Object.entries(optMap)) {
@@ -483,22 +484,26 @@ export function editOrder(
     return result;
   };
 
-  const oldAllItems = { ...order.cafeItems, ...order.foodItems };
-  const newAllItems = { ...newCafeItems, ...newFoodItems };
-  const oldLinked = linkedQtys(oldAllItems, order.itemOptions ?? {});
-  const newLinked = linkedQtys(newAllItems, newItemOptions);
+  const oldLinked = linkedQtys(order.cafeItems, order.foodItems, order.itemOptions ?? {});
+  const newLinked = linkedQtys(newCafeItems, newFoodItems, newItemOptions);
 
   const stmtRestore = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
   const stmtDeduct  = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL');
 
   db.transaction(() => {
-    // 직접 항목 재고 diff
-    for (const name of new Set([...Object.keys(oldAllItems), ...Object.keys(newAllItems)])) {
-      const diff = (oldAllItems[name] ?? 0) - (newAllItems[name] ?? 0);
-      if (diff > 0) stmtRestore.run(diff, name);
-      else if (diff < 0) stmtDeduct.run(-diff, name);
+    // 직접 항목 재고 diff — baseName으로 집계해서 "(2)" suffix 붙은 항목도 올바르게 처리
+    const oldAll = { ...order.cafeItems, ...order.foodItems };
+    const newAll = { ...newCafeItems, ...newFoodItems };
+    const diffByBase: Record<string, number> = {};
+    for (const name of new Set([...Object.keys(oldAll), ...Object.keys(newAll)])) {
+      const base = baseName(name);
+      diffByBase[base] = (diffByBase[base] ?? 0) + (oldAll[name] ?? 0) - (newAll[name] ?? 0);
     }
-    // 옵션 연동 재고 diff
+    for (const [base, diff] of Object.entries(diffByBase)) {
+      if (diff > 0) stmtRestore.run(diff, base);
+      else if (diff < 0) stmtDeduct.run(-diff, base);
+    }
+    // 옵션 연동 재고 diff (linked.name은 이미 DB의 base name)
     for (const name of new Set([...Object.keys(oldLinked), ...Object.keys(newLinked)])) {
       const diff = (oldLinked[name] ?? 0) - (newLinked[name] ?? 0);
       if (diff > 0) stmtRestore.run(diff, name);

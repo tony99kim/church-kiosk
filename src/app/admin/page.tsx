@@ -105,11 +105,16 @@ export default function AdminPage() {
       }
       if (Object.keys(cleaned).length > 0) cleanOpts[itemName] = cleaned;
     }
-    await fetch(`/api/admin/orders/${editOrderState.orderId}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cafeItems: editOrderState.cafeItems, foodItems: editOrderState.foodItems, itemOptions: cleanOpts }),
-    });
-    setEditOrderState(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${editOrderState.orderId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cafeItems: editOrderState.cafeItems, foodItems: editOrderState.foodItems, itemOptions: cleanOpts }),
+      });
+      if (!res.ok) { alert(`저장 실패 (${res.status})`); return; }
+      setEditOrderState(null);
+    } catch (e) {
+      alert(`저장 오류: ${String(e)}`);
+    }
   };
 
   const loadMenus = useCallback(() => fetch('/api/menu').then(r => r.json()).then(setMenus), []);
@@ -479,10 +484,10 @@ export default function AdminPage() {
                       <div key={name} className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-xl">
                         <span className="flex-1 text-sm font-medium">{name}</span>
                         <div className="flex items-center gap-2">
-                          <button onClick={() => setEditOrderState(s => s && { ...s, cafeItems: { ...s.cafeItems, [name]: Math.max(1, qty - 1) } })}
+                          <button onClick={() => setEditOrderState(s => s && { ...s, cafeItems: { ...s.cafeItems, [name]: Math.max(1, (s.cafeItems[name] ?? qty) - 1) } })}
                             disabled={qty <= 1} className="w-7 h-7 rounded-full bg-slate-200 text-lg font-bold flex items-center justify-center disabled:opacity-30">−</button>
                           <span className="w-6 text-center font-black">{qty}</span>
-                          <button onClick={() => setEditOrderState(s => s && { ...s, cafeItems: { ...s.cafeItems, [name]: qty + 1 } })}
+                          <button onClick={() => setEditOrderState(s => s && { ...s, cafeItems: { ...s.cafeItems, [name]: (s.cafeItems[name] ?? qty) + 1 } })}
                             className="w-7 h-7 rounded-full bg-blue-600 text-white text-lg font-bold flex items-center justify-center">+</button>
                         </div>
                       </div>
@@ -504,10 +509,10 @@ export default function AdminPage() {
                           <div className="flex items-center gap-3 px-3 py-2 bg-slate-50">
                             <span className="flex-1 text-sm font-medium">{name}</span>
                             <div className="flex items-center gap-2">
-                              <button onClick={() => setEditOrderState(s => s && { ...s, foodItems: { ...s.foodItems, [name]: Math.max(1, qty - 1) } })}
+                              <button onClick={() => setEditOrderState(s => s && { ...s, foodItems: { ...s.foodItems, [name]: Math.max(1, (s.foodItems[name] ?? qty) - 1) } })}
                                 disabled={qty <= 1} className="w-7 h-7 rounded-full bg-slate-200 text-lg font-bold flex items-center justify-center disabled:opacity-30">−</button>
                               <span className="w-6 text-center font-black">{qty}</span>
-                              <button onClick={() => setEditOrderState(s => s && { ...s, foodItems: { ...s.foodItems, [name]: qty + 1 } })}
+                              <button onClick={() => setEditOrderState(s => s && { ...s, foodItems: { ...s.foodItems, [name]: (s.foodItems[name] ?? qty) + 1 } })}
                                 className="w-7 h-7 rounded-full bg-blue-600 text-white text-lg font-bold flex items-center justify-center">+</button>
                             </div>
                           </div>
@@ -533,7 +538,8 @@ export default function AdminPage() {
                                                 onClick={() => setEditOrderState(s => {
                                                   if (!s) return s;
                                                   const cur = s.itemOptions[name]?.[group.name] ?? {};
-                                                  return { ...s, itemOptions: { ...s.itemOptions, [name]: { ...s.itemOptions[name], [group.name]: { ...cur, [opt.name]: Math.max(0, optQty - 1) } } } };
+                                                  const curQty = cur[opt.name] ?? 0;
+                                                  return { ...s, itemOptions: { ...s.itemOptions, [name]: { ...s.itemOptions[name], [group.name]: { ...cur, [opt.name]: Math.max(0, curQty - 1) } } } };
                                                 })}
                                                 disabled={optQty === 0}
                                                 className="w-7 h-7 rounded-full bg-slate-200 text-lg font-bold flex items-center justify-center disabled:opacity-30">−</button>
@@ -544,7 +550,8 @@ export default function AdminPage() {
                                                   const cur = s.itemOptions[name]?.[group.name] ?? {};
                                                   const curTotal = Object.values(cur).reduce((a, b) => a + b, 0);
                                                   if (curTotal >= group.maxQty) return s;
-                                                  return { ...s, itemOptions: { ...s.itemOptions, [name]: { ...s.itemOptions[name], [group.name]: { ...cur, [opt.name]: optQty + 1 } } } };
+                                                  const curQty = cur[opt.name] ?? 0;
+                                                  return { ...s, itemOptions: { ...s.itemOptions, [name]: { ...s.itemOptions[name], [group.name]: { ...cur, [opt.name]: curQty + 1 } } } };
                                                 })}
                                                 disabled={total >= group.maxQty}
                                                 className="w-7 h-7 rounded-full bg-blue-600 text-white text-lg font-bold flex items-center justify-center disabled:opacity-30">+</button>
