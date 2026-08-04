@@ -83,6 +83,8 @@ export default function KioskPage() {
   useEffect(() => {
     const load = () => fetch('/api/menu').then(r => r.ok ? r.json() : Promise.reject(r.status)).then(setMenus).catch(() => setTimeout(load, 3000));
     load();
+    const interval = setInterval(() => fetch('/api/menu').then(r => r.json()).then(setMenus).catch(() => {}), 30000);
+    return () => clearInterval(interval);
   }, []);
 
   // 주문이 들어올 때마다 재고 갱신 (품절 반영)
