@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useOrders } from '@/lib/useOrders';
-import type { MenuItem } from '@/lib/store';
+import type { MenuItem, Order } from '@/lib/store';
 
 interface Stats { totalOrders: number; totalRevenue: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; }
 
@@ -53,6 +53,64 @@ export default function AdminPage() {
 
   const [optItem, setOptItem]     = useState<MenuItem | null>(null);
   const [editGroups, setEditGroups] = useState<EditGroup[]>([]);
+
+  type EditOrderState = {
+    orderId: number;
+    cafeItems: Record<string, number>;
+    foodItems: Record<string, number>;
+    itemOptions: Record<string, Record<string, Record<string, number>>>;
+  };
+  const [editOrderState, setEditOrderState] = useState<EditOrderState | null>(null);
+
+  const findMenuByOrderName = (name: string) => {
+    const base = name.replace(/ \(\d+\)$/, '');
+    return menus.find(m => m.name === base);
+  };
+
+  const openOrderEdit = (order: Order) => {
+    const fullOpts: EditOrderState['itemOptions'] = {};
+    for (const [itemName, groupMap] of Object.entries(order.itemOptions ?? {})) {
+      const menuItem = findMenuByOrderName(itemName);
+      if (!menuItem) { fullOpts[itemName] = groupMap; continue; }
+      const fullGroup: Record<string, Record<string, number>> = {};
+      for (const group of menuItem.optionGroups) {
+        const cur = groupMap[group.name] ?? {};
+        fullGroup[group.name] = Object.fromEntries(group.options.map(o => [o.name, cur[o.name] ?? 0]));
+      }
+      fullOpts[itemName] = fullGroup;
+    }
+    setEditOrderState({ orderId: order.id, cafeItems: { ...order.cafeItems }, foodItems: { ...order.foodItems }, itemOptions: fullOpts });
+  };
+
+  const saveOrderEdit = async () => {
+    if (!editOrderState) return;
+    for (const [itemName, groupMap] of Object.entries(editOrderState.itemOptions)) {
+      const menuItem = findMenuByOrderName(itemName);
+      if (!menuItem) continue;
+      for (const group of menuItem.optionGroups) {
+        if (!group.required) continue;
+        const total = Object.values(groupMap[group.name] ?? {}).reduce((s, q) => s + q, 0);
+        if (total !== group.maxQty) {
+          alert(`"${itemName}"의 "${group.name}" 옵션을 ${group.maxQty}개 선택해주세요. (현재 ${total}개)`);
+          return;
+        }
+      }
+    }
+    const cleanOpts: EditOrderState['itemOptions'] = {};
+    for (const [itemName, groupMap] of Object.entries(editOrderState.itemOptions)) {
+      const cleaned: Record<string, Record<string, number>> = {};
+      for (const [groupName, opts] of Object.entries(groupMap)) {
+        const filtered = Object.fromEntries(Object.entries(opts).filter(([, q]) => q > 0));
+        if (Object.keys(filtered).length > 0) cleaned[groupName] = filtered;
+      }
+      if (Object.keys(cleaned).length > 0) cleanOpts[itemName] = cleaned;
+    }
+    await fetch(`/api/admin/orders/${editOrderState.orderId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cafeItems: editOrderState.cafeItems, foodItems: editOrderState.foodItems, itemOptions: cleanOpts }),
+    });
+    setEditOrderState(null);
+  };
 
   const loadMenus = useCallback(() => fetch('/api/menu').then(r => r.json()).then(setMenus), []);
   const loadStats = useCallback(() => fetch('/api/stats').then(r => r.json()).then(setStats), []);
@@ -305,10 +363,16 @@ export default function AdminPage() {
                   <div key={order.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-2xl font-black text-slate-700">#{order.id}</span>
-                      <button onClick={() => cancelOrder(order.id)}
-                        className="text-xs bg-red-50 text-red-500 border border-red-200 px-3 py-1.5 rounded-lg font-bold hover:bg-red-100">
-                        주문 취소
-                      </button>
+                      <div className="flex gap-2">
+                        <button onClick={() => openOrderEdit(order)}
+                          className="text-xs bg-blue-50 text-blue-500 border border-blue-200 px-3 py-1.5 rounded-lg font-bold hover:bg-blue-100">
+                          수정
+                        </button>
+                        <button onClick={() => cancelOrder(order.id)}
+                          className="text-xs bg-red-50 text-red-500 border border-red-200 px-3 py-1.5 rounded-lg font-bold hover:bg-red-100">
+                          주문 취소
+                        </button>
+                      </div>
                     </div>
                     <div className="space-y-1.5">
                       {cafeList && (
@@ -393,6 +457,120 @@ export default function AdminPage() {
           ) : (
             <div className="text-center py-16 text-slate-400">불러오는 중...</div>
           )}
+        </div>
+      )}
+
+      {/* ── 주문 수정 모달 ── */}
+      {editOrderState && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+              <h2 className="text-lg font-bold">주문 #{editOrderState.orderId} 수정</h2>
+              <button onClick={() => setEditOrderState(null)} className="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {/* 음료 */}
+              {Object.entries(editOrderState.cafeItems).filter(([, q]) => q > 0).length > 0 && (
+                <div>
+                  <p className="text-sm font-bold text-amber-600 mb-2">☕ 음료</p>
+                  <div className="space-y-2">
+                    {Object.entries(editOrderState.cafeItems).filter(([, q]) => q > 0).map(([name, qty]) => (
+                      <div key={name} className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-xl">
+                        <span className="flex-1 text-sm font-medium">{name}</span>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setEditOrderState(s => s && { ...s, cafeItems: { ...s.cafeItems, [name]: Math.max(1, qty - 1) } })}
+                            disabled={qty <= 1} className="w-7 h-7 rounded-full bg-slate-200 text-lg font-bold flex items-center justify-center disabled:opacity-30">−</button>
+                          <span className="w-6 text-center font-black">{qty}</span>
+                          <button onClick={() => setEditOrderState(s => s && { ...s, cafeItems: { ...s.cafeItems, [name]: qty + 1 } })}
+                            className="w-7 h-7 rounded-full bg-blue-600 text-white text-lg font-bold flex items-center justify-center">+</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 음식 */}
+              {Object.entries(editOrderState.foodItems).filter(([, q]) => q > 0).length > 0 && (
+                <div>
+                  <p className="text-sm font-bold text-green-600 mb-2">🍱 음식</p>
+                  <div className="space-y-3">
+                    {Object.entries(editOrderState.foodItems).filter(([, q]) => q > 0).map(([name, qty]) => {
+                      const menuItem = findMenuByOrderName(name);
+                      const hasOpts = !!editOrderState.itemOptions[name];
+                      return (
+                        <div key={name} className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="flex items-center gap-3 px-3 py-2 bg-slate-50">
+                            <span className="flex-1 text-sm font-medium">{name}</span>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => setEditOrderState(s => s && { ...s, foodItems: { ...s.foodItems, [name]: Math.max(1, qty - 1) } })}
+                                disabled={qty <= 1} className="w-7 h-7 rounded-full bg-slate-200 text-lg font-bold flex items-center justify-center disabled:opacity-30">−</button>
+                              <span className="w-6 text-center font-black">{qty}</span>
+                              <button onClick={() => setEditOrderState(s => s && { ...s, foodItems: { ...s.foodItems, [name]: qty + 1 } })}
+                                className="w-7 h-7 rounded-full bg-blue-600 text-white text-lg font-bold flex items-center justify-center">+</button>
+                            </div>
+                          </div>
+                          {hasOpts && menuItem && (
+                            <div className="p-3 space-y-3 border-t border-slate-100">
+                              {menuItem.optionGroups.map(group => {
+                                const opts = editOrderState.itemOptions[name]?.[group.name] ?? {};
+                                const total = Object.values(opts).reduce((s, q) => s + q, 0);
+                                return (
+                                  <div key={group.id}>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-xs font-bold text-slate-600">{group.name}</span>
+                                      <span className={`text-xs font-bold ${total === group.maxQty ? 'text-blue-600' : 'text-amber-500'}`}>{total}/{group.maxQty}</span>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      {group.options.map(opt => {
+                                        const optQty = opts[opt.name] ?? 0;
+                                        return (
+                                          <div key={opt.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${optQty > 0 ? 'border-blue-300 bg-blue-50' : 'border-slate-200'}`}>
+                                            <span className="flex-1 text-sm">{opt.name}</span>
+                                            <div className="flex items-center gap-2">
+                                              <button
+                                                onClick={() => setEditOrderState(s => {
+                                                  if (!s) return s;
+                                                  const cur = s.itemOptions[name]?.[group.name] ?? {};
+                                                  return { ...s, itemOptions: { ...s.itemOptions, [name]: { ...s.itemOptions[name], [group.name]: { ...cur, [opt.name]: Math.max(0, optQty - 1) } } } };
+                                                })}
+                                                disabled={optQty === 0}
+                                                className="w-7 h-7 rounded-full bg-slate-200 text-lg font-bold flex items-center justify-center disabled:opacity-30">−</button>
+                                              <span className="w-5 text-center font-black text-sm">{optQty}</span>
+                                              <button
+                                                onClick={() => setEditOrderState(s => {
+                                                  if (!s) return s;
+                                                  const cur = s.itemOptions[name]?.[group.name] ?? {};
+                                                  const curTotal = Object.values(cur).reduce((a, b) => a + b, 0);
+                                                  if (curTotal >= group.maxQty) return s;
+                                                  return { ...s, itemOptions: { ...s.itemOptions, [name]: { ...s.itemOptions[name], [group.name]: { ...cur, [opt.name]: optQty + 1 } } } };
+                                                })}
+                                                disabled={total >= group.maxQty}
+                                                className="w-7 h-7 rounded-full bg-blue-600 text-white text-lg font-bold flex items-center justify-center disabled:opacity-30">+</button>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 flex gap-3 shrink-0">
+              <button onClick={() => setEditOrderState(null)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold hover:bg-slate-200">취소</button>
+              <button onClick={saveOrderEdit} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700">저장</button>
+            </div>
+          </div>
         </div>
       )}
 

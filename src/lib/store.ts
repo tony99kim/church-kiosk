@@ -454,6 +454,67 @@ export function updateMenuItem(id: number, data: { name?: string; price?: number
   if (data.price !== undefined) db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
 }
 
+export function editOrder(
+  id: number,
+  newCafeItems: Record<string, number>,
+  newFoodItems: Record<string, number>,
+  newItemOptions: Record<string, Record<string, Record<string, number>>>
+): boolean {
+  const order = state.orders.get(id);
+  if (!order) return false;
+
+  // linked option item qty 계산 헬퍼
+  const linkedQtys = (
+    items: Record<string, number>,
+    opts: Record<string, Record<string, Record<string, number>>>
+  ): Record<string, number> => {
+    const result: Record<string, number> = {};
+    for (const [itemName, groupMap] of Object.entries(opts)) {
+      const parentQty = (items[itemName] ?? 0);
+      if (parentQty <= 0) continue;
+      for (const optMap of Object.values(groupMap)) {
+        for (const [optName, optQty] of Object.entries(optMap)) {
+          if (optQty <= 0) continue;
+          const linked = stmtGetLinkedItem.get(optName) as { name: string } | undefined;
+          if (linked) result[linked.name] = (result[linked.name] ?? 0) + parentQty * optQty;
+        }
+      }
+    }
+    return result;
+  };
+
+  const oldAllItems = { ...order.cafeItems, ...order.foodItems };
+  const newAllItems = { ...newCafeItems, ...newFoodItems };
+  const oldLinked = linkedQtys(oldAllItems, order.itemOptions ?? {});
+  const newLinked = linkedQtys(newAllItems, newItemOptions);
+
+  const stmtRestore = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
+  const stmtDeduct  = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL');
+
+  db.transaction(() => {
+    // 직접 항목 재고 diff
+    for (const name of new Set([...Object.keys(oldAllItems), ...Object.keys(newAllItems)])) {
+      const diff = (oldAllItems[name] ?? 0) - (newAllItems[name] ?? 0);
+      if (diff > 0) stmtRestore.run(diff, name);
+      else if (diff < 0) stmtDeduct.run(-diff, name);
+    }
+    // 옵션 연동 재고 diff
+    for (const name of new Set([...Object.keys(oldLinked), ...Object.keys(newLinked)])) {
+      const diff = (oldLinked[name] ?? 0) - (newLinked[name] ?? 0);
+      if (diff > 0) stmtRestore.run(diff, name);
+      else if (diff < 0) stmtDeduct.run(-diff, name);
+    }
+    db.prepare('UPDATE orders SET cafe_items = ?, food_items = ?, item_options = ? WHERE id = ?')
+      .run(JSON.stringify(newCafeItems), JSON.stringify(newFoodItems), JSON.stringify(newItemOptions), id);
+  })();
+
+  order.cafeItems = newCafeItems;
+  order.foodItems = newFoodItems;
+  order.itemOptions = newItemOptions;
+  broadcast();
+  return true;
+}
+
 export function moveMenuItem(id: number, direction: 'up' | 'down'): void {
   const item = db.prepare('SELECT id, type, sort_order FROM menu_items WHERE id = ?').get(id) as { id: number; type: string; sort_order: number } | undefined;
   if (!item) return;
