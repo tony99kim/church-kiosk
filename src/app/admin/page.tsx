@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useOrders } from '@/lib/useOrders';
 import type { MenuItem } from '@/lib/store';
 
-interface Stats { totalOrders: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; }
+interface Stats { totalOrders: number; totalRevenue: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; }
 
 type EditGroup = { id?: number; name: string; required: boolean; maxQty: number; options: { id?: number; name: string; price: number; linkedMenuItemId?: number | null }[] };
 
@@ -30,6 +30,20 @@ export default function AdminPage() {
   const [newStock, setNewStock] = useState('');
   const [editingStockId, setEditingStockId] = useState<number | null>(null);
   const [editingStockVal, setEditingStockVal] = useState('');
+  const [editingField, setEditingField] = useState<{ id: number; field: 'name' | 'price'; val: string } | null>(null);
+
+  const saveField = async () => {
+    if (!editingField) return;
+    const body = editingField.field === 'name'
+      ? { name: editingField.val.trim() }
+      : { price: Number(editingField.val) || 0 };
+    await fetch(`/api/menu/${editingField.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    setEditingField(null);
+    loadMenus();
+  };
 
   const allOrders = useOrders();
   const activeOrders = allOrders.filter(o =>
@@ -205,7 +219,16 @@ export default function AdminPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-base font-medium truncate">{item.name}</p>
+                            {editingField?.id === item.id && editingField.field === 'name' ? (
+                              <input autoFocus value={editingField.val}
+                                onChange={e => setEditingField(f => f && { ...f, val: e.target.value })}
+                                onKeyDown={e => { if (e.key === 'Enter') saveField(); if (e.key === 'Escape') setEditingField(null); }}
+                                onBlur={saveField}
+                                className="border border-blue-300 rounded-lg px-2 py-0.5 text-base font-medium w-36" />
+                            ) : (
+                              <p className="text-base font-medium truncate cursor-pointer hover:text-blue-500"
+                                onClick={() => setEditingField({ id: item.id, field: 'name', val: item.name })}>{item.name}</p>
+                            )}
                             {item.optionGroups.length > 0 && (
                               <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full shrink-0">옵션 {item.optionGroups.length}개</span>
                             )}
@@ -213,7 +236,18 @@ export default function AdminPage() {
                               <span className="text-xs bg-red-100 text-red-500 px-2 py-0.5 rounded-full shrink-0 font-bold">품절</span>
                             )}
                           </div>
-                          <p className="text-sm text-slate-400">{item.price.toLocaleString('ko-KR')}원</p>
+                          {editingField?.id === item.id && editingField.field === 'price' ? (
+                            <input autoFocus type="number" min="0" step="100" value={editingField.val}
+                              onChange={e => setEditingField(f => f && { ...f, val: e.target.value })}
+                              onKeyDown={e => { if (e.key === 'Enter') saveField(); if (e.key === 'Escape') setEditingField(null); }}
+                              onBlur={saveField}
+                              className="border border-blue-300 rounded-lg px-2 py-0.5 text-sm w-28 mt-0.5" />
+                          ) : (
+                            <p className="text-sm text-slate-400 cursor-pointer hover:text-blue-500"
+                              onClick={() => setEditingField({ id: item.id, field: 'price', val: String(item.price) })}>
+                              {item.price.toLocaleString('ko-KR')}원
+                            </p>
+                          )}
                         </div>
                         <button onClick={() => openOptions(item)} className="text-slate-400 hover:text-blue-500 text-lg px-1.5" title="옵션 편집">⚙</button>
                         <button onClick={() => deleteMenu(item.id)} className="text-slate-300 hover:text-red-500 text-xl font-bold px-1">×</button>
@@ -310,10 +344,17 @@ export default function AdminPage() {
         <div className="p-6 max-w-3xl mx-auto">
           {stats ? (
             <>
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-4 text-center">
-                <p className="text-slate-500 text-base">총 주문</p>
-                <p className="text-7xl font-black text-blue-600 my-2">{stats.totalOrders}</p>
-                <p className="text-slate-500">건</p>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 text-center">
+                  <p className="text-slate-500 text-base">총 주문</p>
+                  <p className="text-7xl font-black text-blue-600 my-2">{stats.totalOrders}</p>
+                  <p className="text-slate-500">건</p>
+                </div>
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 text-center">
+                  <p className="text-slate-500 text-base">총 매출</p>
+                  <p className="text-4xl font-black text-green-600 my-2">{(stats.totalRevenue ?? 0).toLocaleString('ko-KR')}</p>
+                  <p className="text-slate-500">원</p>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4 mb-4">
                 {[{ label: '☕ 카페', items: stats.cafeItems }, { label: '🍱 음식', items: stats.foodItems }].map(({ label, items }) => (

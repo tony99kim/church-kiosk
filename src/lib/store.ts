@@ -449,6 +449,11 @@ export function setMenuStock(id: number, stock: number | null): void {
   db.prepare('UPDATE menu_items SET stock = ? WHERE id = ?').run(stock, id);
 }
 
+export function updateMenuItem(id: number, data: { name?: string; price?: number }): void {
+  if (data.name !== undefined) db.prepare('UPDATE menu_items SET name = ? WHERE id = ?').run(data.name, id);
+  if (data.price !== undefined) db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
+}
+
 export function moveMenuItem(id: number, direction: 'up' | 'down'): void {
   const item = db.prepare('SELECT id, type, sort_order FROM menu_items WHERE id = ?').get(id) as { id: number; type: string; sort_order: number } | undefined;
   if (!item) return;
@@ -485,18 +490,22 @@ export function getStats() {
   const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0').all() as Array<{
     cafe_items: string; food_items: string; item_options: string;
   }>;
+  const priceMap = new Map(
+    (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
+  );
   const cafeItems: Record<string, number> = {};
   const foodItems: Record<string, number> = {};
   const optionItems: Record<string, number> = {};
+  let totalRevenue = 0;
 
   for (const row of rows) {
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.cafe_items) as Record<string, number>))
-        if (q > 0) { const k = baseName(n); cafeItems[k] = (cafeItems[k] ?? 0) + q; }
+        if (q > 0) { const k = baseName(n); cafeItems[k] = (cafeItems[k] ?? 0) + q; totalRevenue += (priceMap.get(k) ?? 0) * q; }
     } catch {}
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.food_items) as Record<string, number>))
-        if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; }
+        if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; totalRevenue += (priceMap.get(k) ?? 0) * q; }
     } catch {}
     try {
       const opts = JSON.parse(row.item_options || '{}') as Record<string, unknown>;
@@ -513,7 +522,7 @@ export function getStats() {
       }
     } catch {}
   }
-  return { totalOrders: rows.length, cafeItems, foodItems, optionItems };
+  return { totalOrders: rows.length, cafeItems, foodItems, optionItems, totalRevenue };
 }
 
 export function getItemSummary(): { name: string; qty: number; isOption: boolean }[] {

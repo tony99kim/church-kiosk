@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteMenuItem, setMenuStock, moveMenuItem } from '@/lib/store';
+import { deleteMenuItem, setMenuStock, moveMenuItem, updateMenuItem } from '@/lib/store';
 
 export async function DELETE(
   _req: Request,
@@ -18,6 +18,8 @@ export async function PATCH(
   const body = await req.json();
   if ('move' in body) {
     moveMenuItem(Number(id), body.move);
+  } else if ('name' in body || 'price' in body) {
+    updateMenuItem(Number(id), { name: body.name, price: body.price !== undefined ? Number(body.price) : undefined });
   } else {
     const { stock } = body;
     const stockVal = (stock === null || stock === '' || stock === undefined) ? null : Number(stock);
