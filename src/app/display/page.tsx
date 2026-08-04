@@ -72,22 +72,8 @@ export default function DisplayPage() {
 
   return (
     <div className="h-screen bg-gray-950 text-white flex overflow-hidden">
-      {/* 카페 */}
-      <div className="flex-1 flex flex-col min-w-0 border-r-4 border-gray-700">
-        <div className="bg-amber-600 py-5 text-center shrink-0">
-          <h2 className="text-5xl font-black tracking-tight">☕ 음료</h2>
-        </div>
-        <div className="flex-1 flex min-h-0">
-          <Column orders={orders} statusKey="cafeStatus" isReady={false} />
-          <div className="w-px bg-gray-700" />
-          <Column orders={orders} statusKey="cafeStatus" isReady={true} />
-        </div>
-      </div>
-
-      <div className="w-2 bg-gray-700 shrink-0" />
-
       {/* 음식 */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 border-r-4 border-gray-700">
         <div className="bg-green-700 py-5 text-center shrink-0">
           <h2 className="text-5xl font-black tracking-tight">🍱 음식</h2>
         </div>
@@ -95,6 +81,20 @@ export default function DisplayPage() {
           <Column orders={orders} statusKey="foodStatus" isReady={false} />
           <div className="w-px bg-gray-700" />
           <Column orders={orders} statusKey="foodStatus" isReady={true} />
+        </div>
+      </div>
+
+      <div className="w-2 bg-gray-700 shrink-0" />
+
+      {/* 카페 */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="bg-amber-600 py-5 text-center shrink-0">
+          <h2 className="text-5xl font-black tracking-tight">☕ 음료</h2>
+        </div>
+        <div className="flex-1 flex min-h-0">
+          <Column orders={orders} statusKey="cafeStatus" isReady={false} />
+          <div className="w-px bg-gray-700" />
+          <Column orders={orders} statusKey="cafeStatus" isReady={true} />
         </div>
       </div>
     </div>
