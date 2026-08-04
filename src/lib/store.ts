@@ -449,6 +449,21 @@ export function setMenuStock(id: number, stock: number | null): void {
   db.prepare('UPDATE menu_items SET stock = ? WHERE id = ?').run(stock, id);
 }
 
+export function moveMenuItem(id: number, direction: 'up' | 'down'): void {
+  const item = db.prepare('SELECT id, type, sort_order FROM menu_items WHERE id = ?').get(id) as { id: number; type: string; sort_order: number } | undefined;
+  if (!item) return;
+  const neighbor = db.prepare(
+    direction === 'up'
+      ? 'SELECT id, sort_order FROM menu_items WHERE type = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1'
+      : 'SELECT id, sort_order FROM menu_items WHERE type = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1'
+  ).get(item.type, item.sort_order) as { id: number; sort_order: number } | undefined;
+  if (!neighbor) return;
+  db.transaction(() => {
+    db.prepare('UPDATE menu_items SET sort_order = ? WHERE id = ?').run(neighbor.sort_order, item.id);
+    db.prepare('UPDATE menu_items SET sort_order = ? WHERE id = ?').run(item.sort_order, neighbor.id);
+  })();
+}
+
 export function deleteMenuItem(id: number): boolean {
   const gids = (db.prepare('SELECT id FROM option_groups WHERE menu_item_id = ?').all(id) as { id: number }[]).map(r => r.id);
   db.transaction(() => {

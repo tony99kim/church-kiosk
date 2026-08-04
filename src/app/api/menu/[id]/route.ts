@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteMenuItem, setMenuStock } from '@/lib/store';
+import { deleteMenuItem, setMenuStock, moveMenuItem } from '@/lib/store';
 
 export async function DELETE(
   _req: Request,
@@ -15,8 +15,13 @@ export async function PATCH(
   ctx: RouteContext<'/api/menu/[id]'>
 ) {
   const { id } = await ctx.params;
-  const { stock } = await req.json();
-  const stockVal = (stock === null || stock === '' || stock === undefined) ? null : Number(stock);
-  setMenuStock(Number(id), stockVal);
+  const body = await req.json();
+  if ('move' in body) {
+    moveMenuItem(Number(id), body.move);
+  } else {
+    const { stock } = body;
+    const stockVal = (stock === null || stock === '' || stock === undefined) ? null : Number(stock);
+    setMenuStock(Number(id), stockVal);
+  }
   return NextResponse.json({ ok: true });
 }

@@ -39,7 +39,7 @@ function MenuCard({ item, totalQty, onOpen }: MenuCardProps) {
   const inCart = totalQty > 0;
   return (
     <button type="button" onClick={soldOut ? undefined : onOpen} disabled={soldOut}
-      className={`relative text-left rounded-2xl p-4 border-2 transition-all ${
+      className={`relative text-left rounded-2xl p-5 border-2 transition-all ${
         soldOut
           ? 'border-slate-200 bg-slate-100 opacity-60 cursor-not-allowed'
           : inCart
@@ -54,11 +54,11 @@ function MenuCard({ item, totalQty, onOpen }: MenuCardProps) {
           {totalQty}
         </span>
       )}
-      <p className={`text-base font-semibold leading-snug pr-8 ${soldOut ? 'text-slate-400 line-through' : inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
+      <p className={`text-lg font-semibold leading-snug pr-8 ${soldOut ? 'text-slate-400 line-through' : inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
       {item.optionGroups.length > 0 && !soldOut && (
         <p className="text-xs text-blue-400 mt-0.5">옵션 선택</p>
       )}
-      <p className={`text-sm font-bold mt-1 ${soldOut ? 'text-slate-300' : inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
+      <p className={`text-base font-bold mt-1 ${soldOut ? 'text-slate-300' : inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
       {item.stock !== null && item.stock > 0 && (
         <p className="text-xs text-orange-500 font-bold mt-0.5">잔여 {item.stock}개</p>
       )}
@@ -295,7 +295,7 @@ export default function KioskPage() {
   };
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
+    <div className="h-dvh flex flex-col overflow-hidden bg-slate-50">
       <header className="bg-white border-b border-slate-200 px-6 py-3 shrink-0 flex items-center justify-between">
         <h1 className="text-2xl font-black text-blue-600">주문하기</h1>
         {totalQty > 0 && (

@@ -73,6 +73,14 @@ export default function AdminPage() {
     loadMenus();
   };
 
+  const moveMenu = async (id: number, direction: 'up' | 'down') => {
+    await fetch(`/api/menu/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ move: direction }),
+    });
+    loadMenus();
+  };
+
   const cancelOrder = async (id: number) => {
     if (!confirm(`${id}번 주문을 취소하시겠습니까?`)) return;
     await fetch(`/api/admin/orders/${id}`, { method: 'DELETE' });
@@ -186,9 +194,15 @@ export default function AdminPage() {
               <div key={label} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
                 <h3 className="text-base font-bold mb-3 text-slate-600">{label}</h3>
                 <div className="space-y-2">
-                  {items.map(item => (
+                  {items.map((item, idx) => (
                     <div key={item.id} className="py-2 border-b border-slate-50 last:border-0">
                       <div className="flex items-center gap-2">
+                        <div className="flex flex-col gap-0.5 shrink-0">
+                          <button onClick={() => moveMenu(item.id, 'up')} disabled={idx === 0}
+                            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 text-xs leading-none px-1">▲</button>
+                          <button onClick={() => moveMenu(item.id, 'down')} disabled={idx === items.length - 1}
+                            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 text-xs leading-none px-1">▼</button>
+                        </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-base font-medium truncate">{item.name}</p>
