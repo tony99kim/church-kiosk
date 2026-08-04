@@ -139,8 +139,13 @@ export default function KioskPage() {
       if (tempQty === 0) setCart(p => p.filter(e => e.key !== editingKey));
       else setCart(p => p.map(e => e.key === editingKey ? { ...e, qty: tempQty, options: tempOpts } : e));
     } else if (tempQty > 0) {
-      const key = String(++cartKeyRef.current);
-      setCart(p => [...p, { key, itemId: modal.id, qty: tempQty, options: tempOpts }]);
+      const existing = cart.find(e => e.itemId === modal.id && JSON.stringify(e.options) === JSON.stringify(tempOpts));
+      if (existing) {
+        setCart(p => p.map(e => e.key === existing.key ? { ...e, qty: e.qty + tempQty } : e));
+      } else {
+        const key = String(++cartKeyRef.current);
+        setCart(p => [...p, { key, itemId: modal.id, qty: tempQty, options: tempOpts }]);
+      }
     }
     setModal(null); setEditingKey(null);
   };
