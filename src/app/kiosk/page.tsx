@@ -39,7 +39,7 @@ function MenuCard({ item, totalQty, onOpen }: MenuCardProps) {
   const inCart = totalQty > 0;
   return (
     <button type="button" onClick={soldOut ? undefined : onOpen} disabled={soldOut}
-      className={`relative text-left rounded-2xl p-5 border-2 transition-all ${
+      className={`relative text-left rounded-2xl p-6 border-2 transition-all ${
         soldOut
           ? 'border-slate-200 bg-slate-100 opacity-60 cursor-not-allowed'
           : inCart
@@ -54,13 +54,13 @@ function MenuCard({ item, totalQty, onOpen }: MenuCardProps) {
           {totalQty}
         </span>
       )}
-      <p className={`text-lg font-semibold leading-snug pr-8 ${soldOut ? 'text-slate-400 line-through' : inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
+      <p className={`text-2xl font-bold leading-snug pr-8 ${soldOut ? 'text-slate-400 line-through' : inCart ? 'text-blue-700' : 'text-slate-800'}`}>{item.name}</p>
       {item.optionGroups.length > 0 && !soldOut && (
-        <p className="text-xs text-blue-400 mt-0.5">옵션 선택</p>
+        <p className="text-sm text-blue-400 mt-1">옵션 선택</p>
       )}
-      <p className={`text-base font-bold mt-1 ${soldOut ? 'text-slate-300' : inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
+      <p className={`text-xl font-bold mt-2 ${soldOut ? 'text-slate-300' : inCart ? 'text-blue-600' : 'text-slate-500'}`}>{won(item.price)}</p>
       {item.stock !== null && item.stock > 0 && (
-        <p className="text-xs text-orange-500 font-bold mt-0.5">잔여 {item.stock}개</p>
+        <p className="text-sm text-orange-500 font-bold mt-1">잔여 {item.stock}개</p>
       )}
     </button>
   );
