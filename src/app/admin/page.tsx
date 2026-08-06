@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useOrders } from '@/lib/useOrders';
 import type { MenuItem, Order } from '@/lib/store';
 
-interface Stats { totalOrders: number; totalRevenue: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; }
+interface Stats { totalOrders: number; totalRevenue: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; itemRevenue: Record<string, number>; }
 
 type EditGroup = { id?: number; name: string; required: boolean; maxQty: number; options: { id?: number; name: string; price: number; linkedMenuItemId?: number | null }[] };
 
@@ -432,9 +432,14 @@ export default function AdminPage() {
                     {Object.entries(items).length === 0
                       ? <p className="text-slate-400 text-sm">판매 없음</p>
                       : Object.entries(items).sort(([, a], [, b]) => b - a).map(([name, qty]) => (
-                        <div key={name} className="flex justify-between py-2 border-b border-slate-50 last:border-0">
-                          <span className="text-sm text-slate-700 truncate mr-2">{name}</span>
-                          <span className="text-sm font-bold text-blue-600 shrink-0">{qty}개</span>
+                        <div key={name} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0 gap-2">
+                          <span className="text-sm text-slate-700 truncate">{name}</span>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-sm font-bold text-blue-600">{qty}개</span>
+                            {(stats.itemRevenue[name] ?? 0) > 0 && (
+                              <span className="text-sm text-slate-400">{(stats.itemRevenue[name]).toLocaleString('ko-KR')}원</span>
+                            )}
+                          </div>
                         </div>
                       ))}
                   </div>

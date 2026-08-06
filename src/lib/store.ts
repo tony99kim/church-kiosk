@@ -562,16 +562,17 @@ export function getStats() {
   const cafeItems: Record<string, number> = {};
   const foodItems: Record<string, number> = {};
   const optionItems: Record<string, number> = {};
+  const itemRevenue: Record<string, number> = {};
   let totalRevenue = 0;
 
   for (const row of rows) {
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.cafe_items) as Record<string, number>))
-        if (q > 0) { const k = baseName(n); cafeItems[k] = (cafeItems[k] ?? 0) + q; totalRevenue += (priceMap.get(k) ?? 0) * q; }
+        if (q > 0) { const k = baseName(n); cafeItems[k] = (cafeItems[k] ?? 0) + q; const rev = (priceMap.get(k) ?? 0) * q; totalRevenue += rev; itemRevenue[k] = (itemRevenue[k] ?? 0) + rev; }
     } catch {}
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.food_items) as Record<string, number>))
-        if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; totalRevenue += (priceMap.get(k) ?? 0) * q; }
+        if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; const rev = (priceMap.get(k) ?? 0) * q; totalRevenue += rev; itemRevenue[k] = (itemRevenue[k] ?? 0) + rev; }
     } catch {}
     let perRowCafe: Record<string, number> = {};
     let perRowFood: Record<string, number> = {};
@@ -593,7 +594,7 @@ export function getStats() {
       }
     } catch {}
   }
-  return { totalOrders: rows.length, cafeItems, foodItems, optionItems, totalRevenue };
+  return { totalOrders: rows.length, cafeItems, foodItems, optionItems, totalRevenue, itemRevenue };
 }
 
 export function getItemSummary(): { name: string; qty: number; isOption: boolean }[] {
