@@ -658,10 +658,11 @@ export function getOrdersForExport() {
     for (const [n, q] of Object.entries(cafeItems)) if (q > 0) total += (priceMap.get(baseName(n)) ?? 0) * q;
     for (const [n, q] of Object.entries(foodItems)) if (q > 0) total += (priceMap.get(baseName(n)) ?? 0) * q;
 
-    const itemsList = [
-      ...Object.entries(cafeItems).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n),
-      ...Object.entries(foodItems).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n),
-    ].join(', ');
+    // baseName으로 (2)/(3) suffix 항목을 합산해서 표시
+    const mergedItems: Record<string, number> = {};
+    for (const [n, q] of [...Object.entries(cafeItems), ...Object.entries(foodItems)])
+      if (q > 0) { const k = baseName(n); mergedItems[k] = (mergedItems[k] ?? 0) + q; }
+    const itemsList = Object.entries(mergedItems).map(([n, q]) => q > 1 ? `${n}×${q}` : n).join(', ');
 
     const optionsStr = Object.entries(rawOpts)
       .filter(([, v]) => v && typeof v === 'object' && !Array.isArray(v))
