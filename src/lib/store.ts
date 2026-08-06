@@ -573,16 +573,21 @@ export function getStats() {
       for (const [n, q] of Object.entries(JSON.parse(row.food_items) as Record<string, number>))
         if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; totalRevenue += (priceMap.get(k) ?? 0) * q; }
     } catch {}
+    let perRowCafe: Record<string, number> = {};
+    let perRowFood: Record<string, number> = {};
+    try { perRowCafe = JSON.parse(row.cafe_items); } catch {}
+    try { perRowFood = JSON.parse(row.food_items); } catch {}
     try {
       const opts = JSON.parse(row.item_options || '{}') as Record<string, unknown>;
-      for (const [, groupMap] of Object.entries(opts)) {
+      for (const [itemName, groupMap] of Object.entries(opts)) {
         if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
+        const parentQty = Math.max(1, (perRowCafe[itemName] ?? 0) + (perRowFood[itemName] ?? 0));
         for (const [, optMap] of Object.entries(groupMap as Record<string, unknown>)) {
           if (typeof optMap === 'string') {
-            optionItems[optMap] = (optionItems[optMap] ?? 0) + 1;
+            optionItems[optMap] = (optionItems[optMap] ?? 0) + parentQty;
           } else if (optMap && typeof optMap === 'object' && !Array.isArray(optMap)) {
             for (const [optName, qty] of Object.entries(optMap as Record<string, number>))
-              if (qty > 0) optionItems[optName] = (optionItems[optName] ?? 0) + qty;
+              if (qty > 0) optionItems[optName] = (optionItems[optName] ?? 0) + qty * parentQty;
           }
         }
       }
@@ -609,14 +614,15 @@ export function getItemSummary(): { name: string; qty: number; isOption: boolean
     for (const [n, q] of Object.entries(cafe)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; }
     for (const [n, q] of Object.entries(food)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; }
 
-    for (const [, groupMap] of Object.entries(opts)) {
+    for (const [itemName, groupMap] of Object.entries(opts)) {
       if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
+      const parentQty = Math.max(1, (cafe[itemName] ?? 0) + (food[itemName] ?? 0));
       for (const [, optMap] of Object.entries(groupMap as Record<string, unknown>)) {
         if (typeof optMap === 'string') {
-          options[optMap] = (options[optMap] ?? 0) + 1;
+          options[optMap] = (options[optMap] ?? 0) + parentQty;
         } else if (optMap && typeof optMap === 'object' && !Array.isArray(optMap)) {
           for (const [optName, qty] of Object.entries(optMap as Record<string, number>))
-            if (qty > 0) options[optName] = (options[optName] ?? 0) + qty;
+            if (qty > 0) options[optName] = (options[optName] ?? 0) + qty * parentQty;
         }
       }
     }
