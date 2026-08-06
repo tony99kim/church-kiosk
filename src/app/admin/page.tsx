@@ -429,12 +429,12 @@ export default function AdminPage() {
                 {[{ label: '☕ 카페', items: stats.cafeItems }, { label: '🍱 음식', items: stats.foodItems }].map(({ label, items }) => {
                   const subtotal = Object.keys(items).reduce((s, name) => s + (stats.itemRevenue[name] ?? 0), 0);
                   return (
-                  <div key={label} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                    <h3 className="text-base font-bold mb-3 text-slate-600">{label}</h3>
-                    {Object.entries(items).length === 0
-                      ? <p className="text-slate-400 text-sm">판매 없음</p>
-                      : <>
-                          {Object.entries(items).sort(([, a], [, b]) => b - a).map(([name, qty]) => (
+                  <div key={label} className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+                    <div className="p-5 flex-1">
+                      <h3 className="text-base font-bold mb-3 text-slate-600">{label}</h3>
+                      {Object.entries(items).length === 0
+                        ? <p className="text-slate-400 text-sm">판매 없음</p>
+                        : Object.entries(items).sort(([, a], [, b]) => b - a).map(([name, qty]) => (
                             <div key={name} className="flex items-center justify-between py-2 border-b border-slate-50 gap-2">
                               <span className="text-sm text-slate-700 truncate">{name}</span>
                               <div className="flex items-center gap-3 shrink-0">
@@ -444,15 +444,15 @@ export default function AdminPage() {
                                 )}
                               </div>
                             </div>
-                          ))}
-                          {subtotal > 0 && (
-                            <div className="flex justify-between pt-3 mt-1">
-                              <span className="text-sm font-bold text-slate-500">소계</span>
-                              <span className="text-sm font-black text-slate-700">{subtotal.toLocaleString('ko-KR')}원</span>
-                            </div>
-                          )}
-                        </>
-                    }
+                          ))
+                      }
+                    </div>
+                    {subtotal > 0 && (
+                      <div className="flex justify-between items-center px-5 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
+                        <span className="text-sm font-bold text-slate-500">소계</span>
+                        <span className="text-base font-black text-slate-700">{subtotal.toLocaleString('ko-KR')}원</span>
+                      </div>
+                    )}
                   </div>
                   );
                 })}
