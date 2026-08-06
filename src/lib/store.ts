@@ -655,8 +655,8 @@ export function getOrdersForExport() {
     try { rawOpts = JSON.parse(r.item_options || '{}'); } catch { /* empty */ }
 
     let total = 0;
-    for (const [n, q] of Object.entries(cafeItems)) if (q > 0) total += (priceMap.get(n) ?? 0) * q;
-    for (const [n, q] of Object.entries(foodItems)) if (q > 0) total += (priceMap.get(n) ?? 0) * q;
+    for (const [n, q] of Object.entries(cafeItems)) if (q > 0) total += (priceMap.get(baseName(n)) ?? 0) * q;
+    for (const [n, q] of Object.entries(foodItems)) if (q > 0) total += (priceMap.get(baseName(n)) ?? 0) * q;
 
     const itemsList = [
       ...Object.entries(cafeItems).filter(([, q]) => q > 0).map(([n, q]) => q > 1 ? `${n}×${q}` : n),
