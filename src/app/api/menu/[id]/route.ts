@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteMenuItem, setMenuStock, moveMenuItem, updateMenuItem } from '@/lib/store';
 

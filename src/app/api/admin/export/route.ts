@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { getOrdersForExport, getItemSummary } from '@/lib/store';
 
 export async function GET() {
