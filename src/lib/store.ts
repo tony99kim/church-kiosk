@@ -616,11 +616,12 @@ function baseName(name: string): string {
   return name.replace(/ \(\d+\)$/, '');
 }
 
-export function getUnpricedItems(): { name: string; currentPrice: number | null; orderCount: number }[] {
+export function getUnpricedItems(date?: string): { name: string; currentPrice: number | null; orderCount: number }[] {
   // 전체 주문 스캔 — item_prices가 부분적으로 채워진 경우도 처리
-  const rows = db.prepare(
-    'SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0'
-  ).all() as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
+  const sql = date
+    ? "SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0 AND date(created_at/1000, 'unixepoch', '+9 hours') = ?"
+    : 'SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0';
+  const rows = (date ? db.prepare(sql).all(date) : db.prepare(sql).all()) as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
 
   const currentPrices = new Map(
     (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
@@ -648,11 +649,12 @@ export function getUnpricedItems(): { name: string; currentPrice: number | null;
   })).sort((a, b) => b.orderCount - a.orderCount);
 }
 
-export function applyLegacyPrices(prices: Record<string, number>): void {
+export function applyLegacyPrices(prices: Record<string, number>, date?: string): void {
   // 전체 주문 스캔 — 부분적으로 채워진 item_prices도 처리
-  const rows = db.prepare(
-    'SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0'
-  ).all() as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
+  const sql = date
+    ? "SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0 AND date(created_at/1000, 'unixepoch', '+9 hours') = ?"
+    : 'SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0';
+  const rows = (date ? db.prepare(sql).all(date) : db.prepare(sql).all()) as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
 
   db.transaction(() => {
     for (const row of rows) {

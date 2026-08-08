@@ -134,11 +134,13 @@ export default function AdminPage() {
   }, [selectedDate]);
   const loadDates = useCallback(() => fetch('/api/admin/dates').then(r => r.json()).then(setAvailableDates), []);
 
-  const loadUnpriced = () =>
-    fetch('/api/admin/fix-prices').then(r => r.json()).then((items: UnpricedItem[]) => {
+  const loadUnpriced = (date?: string) => {
+    const url = date ? `/api/admin/fix-prices?date=${date}` : '/api/admin/fix-prices';
+    return fetch(url).then(r => r.json()).then((items: UnpricedItem[]) => {
       setUnpricedItems(items);
       setPriceEdits(Object.fromEntries(items.map(i => [i.name, i.currentPrice !== null ? String(i.currentPrice) : ''])));
     });
+  };
 
   const applyPrices = async () => {
     const prices: Record<string, number> = {};
@@ -147,8 +149,9 @@ export default function AdminPage() {
       if (!isNaN(n) && val.trim() !== '') prices[name] = n;
     }
     if (Object.keys(prices).length === 0) return;
-    await fetch('/api/admin/fix-prices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(prices) });
-    await loadUnpriced();
+    const url = selectedDate ? `/api/admin/fix-prices?date=${selectedDate}` : '/api/admin/fix-prices';
+    await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(prices) });
+    await loadUnpriced(selectedDate || undefined);
     loadStats();
     alert('적용 완료');
   };
@@ -585,9 +588,9 @@ export default function AdminPage() {
               {/* 구형 주문 가격 복구 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
                 <button
-                  onClick={() => { setFixPriceOpen(o => !o); if (!fixPriceOpen && !unpricedItems) loadUnpriced(); }}
+                  onClick={() => { setFixPriceOpen(o => !o); if (!fixPriceOpen) { setUnpricedItems(null); loadUnpriced(selectedDate || undefined); } }}
                   className="w-full flex items-center justify-between px-5 py-4 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-2xl">
-                  <span>🛠 구형 주문 가격 복구</span>
+                  <span>🛠 구형 주문 가격 복구 {selectedDate ? `(${formatDate(selectedDate)})` : '(전체)'}</span>
                   <span className="text-slate-400 text-xs">{fixPriceOpen ? '▲' : '▼'}</span>
                 </button>
                 {fixPriceOpen && (
