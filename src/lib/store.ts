@@ -721,6 +721,31 @@ export function getOrdersForExport(date?: string) {
   });
 }
 
+function restoreStockFromItems(
+  cafeItems: Record<string, number>,
+  foodItems: Record<string, number>,
+  itemOptions: Record<string, unknown>,
+): void {
+  const qtys: Record<string, number> = {};
+  for (const [n, q] of Object.entries(cafeItems)) if (q > 0) { const b = baseName(n); qtys[b] = (qtys[b] ?? 0) + q; }
+  for (const [n, q] of Object.entries(foodItems)) if (q > 0) { const b = baseName(n); qtys[b] = (qtys[b] ?? 0) + q; }
+  for (const [name, qty] of Object.entries(qtys)) stmtRestoreStock.run(qty, name);
+
+  for (const [itemName, groupMap] of Object.entries(itemOptions)) {
+    if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
+    const parentQty = (cafeItems[itemName] ?? 0) + (foodItems[itemName] ?? 0);
+    if (parentQty <= 0) continue;
+    for (const optMap of Object.values(groupMap as Record<string, unknown>)) {
+      if (!optMap || typeof optMap !== 'object' || Array.isArray(optMap)) continue;
+      for (const [optName, optQty] of Object.entries(optMap as Record<string, number>)) {
+        if (optQty <= 0) continue;
+        const linked = stmtGetLinkedItem.get(optName) as { name: string } | undefined;
+        if (linked) stmtRestoreStock.run(parentQty * optQty, linked.name);
+      }
+    }
+  }
+}
+
 export function cancelOrder(id: number): boolean {
   const order = state.orders.get(id);
   if (!order) return false;
@@ -734,21 +759,7 @@ export function cancelOrder(id: number): boolean {
   state.orders.delete(id);
   db.transaction(() => {
     stmtCancelOrder.run(id);
-    for (const [name, qty] of Object.entries(order.cafeItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
-    for (const [name, qty] of Object.entries(order.foodItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
-    // 옵션에 연동된 메뉴 아이템 재고 복원
-    for (const [itemName, groupMap] of Object.entries(order.itemOptions ?? {})) {
-      const parentQty = (order.cafeItems[itemName] ?? 0) + (order.foodItems[itemName] ?? 0);
-      if (parentQty <= 0 || !groupMap) continue;
-      for (const optMap of Object.values(groupMap as Record<string, Record<string, number>>)) {
-        if (!optMap) continue;
-        for (const [optName, optQty] of Object.entries(optMap)) {
-          if (optQty <= 0) continue;
-          const linked = stmtGetLinkedItem.get(optName) as { name: string } | undefined;
-          if (linked) stmtRestoreStock.run(parentQty * optQty, linked.name);
-        }
-      }
-    }
+    restoreStockFromItems(order.cafeItems, order.foodItems, order.itemOptions ?? {});
   })();
 
   // 빈 슬롯에 오버플로우 주문 배정
@@ -774,12 +785,26 @@ export function cancelOrder(id: number): boolean {
 }
 
 export function resetOrdersByDate(date: string): void {
-  const ids = (db.prepare(
+  const rows = db.prepare(
+    "SELECT id, cafe_items, food_items, item_options FROM orders WHERE cancelled = 0 AND date(created_at/1000, 'unixepoch', '+9 hours') = ?"
+  ).all(date) as { id: number; cafe_items: string; food_items: string; item_options: string }[];
+  const allIds = (db.prepare(
     "SELECT id FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ?"
   ).all(date) as { id: number }[]).map(r => r.id);
-  if (ids.length === 0) return;
-  db.prepare("DELETE FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ?").run(date);
-  for (const id of ids) state.orders.delete(id);
+  if (allIds.length === 0) return;
+  db.transaction(() => {
+    for (const row of rows) {
+      let cafe: Record<string, number> = {};
+      let food: Record<string, number> = {};
+      let opts: Record<string, unknown> = {};
+      try { cafe = JSON.parse(row.cafe_items); } catch {}
+      try { food = JSON.parse(row.food_items); } catch {}
+      try { opts = JSON.parse(row.item_options || '{}'); } catch {}
+      restoreStockFromItems(cafe, food, opts);
+    }
+    db.prepare("DELETE FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ?").run(date);
+  })();
+  for (const id of allIds) state.orders.delete(id);
   state.cafeSlots        = Array(10).fill(null);
   state.foodSlots        = Array(10).fill(null);
   state.cafePickupSlots  = Array(10).fill(null);
@@ -788,7 +813,21 @@ export function resetOrdersByDate(date: string): void {
 }
 
 export function resetOrders(): void {
-  db.prepare('DELETE FROM orders').run(); // 취소 포함 전체 삭제 (행사 초기화용)
+  const rows = db.prepare(
+    'SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0'
+  ).all() as { cafe_items: string; food_items: string; item_options: string }[];
+  db.transaction(() => {
+    for (const row of rows) {
+      let cafe: Record<string, number> = {};
+      let food: Record<string, number> = {};
+      let opts: Record<string, unknown> = {};
+      try { cafe = JSON.parse(row.cafe_items); } catch {}
+      try { food = JSON.parse(row.food_items); } catch {}
+      try { opts = JSON.parse(row.item_options || '{}'); } catch {}
+      restoreStockFromItems(cafe, food, opts);
+    }
+    db.prepare('DELETE FROM orders').run();
+  })();
   state.orders.clear();
   state.nextId = 1;
   state.cafeSlots        = Array(10).fill(null);
