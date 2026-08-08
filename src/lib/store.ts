@@ -553,8 +553,29 @@ export function moveMenuItem(id: number, direction: 'up' | 'down'): void {
 }
 
 export function deleteMenuItem(id: number): boolean {
+  const item = db.prepare('SELECT name, price FROM menu_items WHERE id = ?').get(id) as { name: string; price: number } | undefined;
+  if (!item) return false;
+
   const gids = (db.prepare('SELECT id FROM option_groups WHERE menu_item_id = ?').all(id) as { id: number }[]).map(r => r.id);
+  // 삭제 전: 이 메뉴를 포함한 주문들의 item_prices에 현재 가격을 스냅샷으로 기록
+  // (item_prices 기능 이전 주문의 fallback이 사라지는 문제 방지)
+  const orders = db.prepare('SELECT id, cafe_items, food_items, item_prices FROM orders').all() as {
+    id: number; cafe_items: string; food_items: string; item_prices: string;
+  }[];
   db.transaction(() => {
+    for (const order of orders) {
+      let cafe: Record<string, number> = {};
+      let food: Record<string, number> = {};
+      let prices: Record<string, number> = {};
+      try { cafe = JSON.parse(order.cafe_items); } catch {}
+      try { food = JSON.parse(order.food_items); } catch {}
+      try { prices = JSON.parse(order.item_prices || '{}'); } catch {}
+      const referenced = Object.keys({ ...cafe, ...food }).some(n => baseName(n) === item.name);
+      if (referenced && !(item.name in prices)) {
+        prices[item.name] = item.price;
+        db.prepare('UPDATE orders SET item_prices = ? WHERE id = ?').run(JSON.stringify(prices), order.id);
+      }
+    }
     for (const gid of gids) db.prepare('DELETE FROM option_items WHERE group_id = ?').run(gid);
     db.prepare('DELETE FROM option_groups WHERE menu_item_id = ?').run(id);
     db.prepare('DELETE FROM menu_items WHERE id = ?').run(id);
