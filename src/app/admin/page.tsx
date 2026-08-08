@@ -212,10 +212,14 @@ export default function AdminPage() {
       ? { ...g, options: g.options.map((o, j) => j === oi ? { ...o, [key]: val } : o) }
       : g));
 
-  const resetOrders = async () => {
-    if (!confirm('모든 주문을 초기화하시겠습니까?\n(통계 데이터도 함께 삭제됩니다)')) return;
-    await fetch('/api/admin/reset', { method: 'POST' });
-    alert('초기화 완료'); loadStats();
+  const resetOrders = async (date?: string) => {
+    const msg = date
+      ? `${formatDate(date)} 주문을 초기화하시겠습니까?\n(해당 날짜 데이터가 삭제됩니다)`
+      : '전체 주문을 초기화하시겠습니까?\n(모든 데이터가 삭제됩니다)';
+    if (!confirm(msg)) return;
+    const url = date ? `/api/admin/reset?date=${date}` : '/api/admin/reset';
+    await fetch(url, { method: 'POST' });
+    alert('초기화 완료'); loadDates(); loadStats();
   };
 
   const cafeMenus = menus.filter(m => m.type === 'cafe');
@@ -500,8 +504,9 @@ export default function AdminPage() {
               )}
               <div className="flex gap-3">
                 <button onClick={loadStats} className="flex-1 py-4 rounded-2xl bg-slate-100 text-slate-700 text-base font-bold hover:bg-slate-200">새로고침</button>
-                <a href={`/api/admin/export${selectedDate ? `?date=${selectedDate}` : ''}`} download className="flex-1 py-4 rounded-2xl bg-green-600 text-white text-base font-bold text-center hover:bg-green-700">📥 CSV 다운로드</a>
-                <button onClick={resetOrders} className="flex-1 py-4 rounded-2xl bg-red-500 text-white text-base font-bold hover:bg-red-600">주문 초기화</button>
+                <a href={`/api/admin/export${selectedDate ? `?date=${selectedDate}` : ''}`} download className="flex-1 py-4 rounded-2xl bg-green-600 text-white text-base font-bold text-center hover:bg-green-700">📥 CSV</a>
+                <button onClick={() => resetOrders(selectedDate || undefined)} className="flex-1 py-4 rounded-2xl bg-orange-400 text-white text-base font-bold hover:bg-orange-500">{selectedDate ? '날짜 초기화' : '전체 초기화'}</button>
+                <button onClick={() => resetOrders()} className="flex-1 py-4 rounded-2xl bg-red-500 text-white text-base font-bold hover:bg-red-600">전체 초기화</button>
               </div>
             </>
           ) : (

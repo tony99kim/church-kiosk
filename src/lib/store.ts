@@ -772,6 +772,20 @@ export function cancelOrder(id: number): boolean {
   return true;
 }
 
+export function resetOrdersByDate(date: string): void {
+  const ids = (db.prepare(
+    "SELECT id FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ?"
+  ).all(date) as { id: number }[]).map(r => r.id);
+  if (ids.length === 0) return;
+  db.prepare(`DELETE FROM orders WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+  for (const id of ids) state.orders.delete(id);
+  state.cafeSlots        = Array(10).fill(null);
+  state.foodSlots        = Array(10).fill(null);
+  state.cafePickupSlots  = Array(10).fill(null);
+  state.foodPickupSlots  = Array(10).fill(null);
+  broadcast();
+}
+
 export function resetOrders(): void {
   db.prepare('DELETE FROM orders').run(); // 취소 포함 전체 삭제 (행사 초기화용)
   state.orders.clear();
