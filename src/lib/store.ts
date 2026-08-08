@@ -449,8 +449,77 @@ export function setMenuStock(id: number, stock: number | null): void {
   db.prepare('UPDATE menu_items SET stock = ? WHERE id = ?').run(stock, id);
 }
 
+function renameInOrders(oldName: string, newName: string): void {
+  const rows = db.prepare('SELECT id, cafe_items, food_items, item_options FROM orders').all() as Array<{ id: number; cafe_items: string; food_items: string; item_options: string }>;
+  const update = db.prepare('UPDATE orders SET cafe_items = ?, food_items = ?, item_options = ? WHERE id = ?');
+
+  const renameKey = (k: string) => {
+    if (k === oldName) return newName;
+    const m = k.match(/^(.+?)( \(\d+\))$/);
+    return m && m[1] === oldName ? newName + m[2] : k;
+  };
+
+  const renameNumeric = (obj: Record<string, number>): [Record<string, number>, boolean] => {
+    let changed = false;
+    const out: Record<string, number> = { ...obj };
+    for (const [k, v] of Object.entries(obj)) {
+      const nk = renameKey(k);
+      if (nk !== k) { out[nk] = (out[nk] ?? 0) + v; delete out[k]; changed = true; }
+    }
+    return [out, changed];
+  };
+
+  db.transaction(() => {
+    for (const row of rows) {
+      let cafe: Record<string, number> = {};
+      let food: Record<string, number> = {};
+      let opts: Record<string, unknown> = {};
+      try { cafe = JSON.parse(row.cafe_items); } catch {}
+      try { food = JSON.parse(row.food_items); } catch {}
+      try { opts = JSON.parse(row.item_options || '{}'); } catch {}
+
+      const [newCafe, c1] = renameNumeric(cafe);
+      const [newFood, c2] = renameNumeric(food);
+
+      // item_options의 outer key가 메뉴 이름
+      let c3 = false;
+      const newOpts: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(opts)) {
+        const nk = renameKey(k);
+        if (nk !== k) c3 = true;
+        newOpts[nk] = v;
+      }
+
+      if (c1 || c2 || c3) {
+        update.run(JSON.stringify(newCafe), JSON.stringify(newFood), JSON.stringify(newOpts), row.id);
+      }
+    }
+  })();
+
+  // 메모리 상태도 동기화 (진행 중인 주문 표시 정확성)
+  for (const order of state.orders.values()) {
+    const rekey = (obj: Record<string, number>): Record<string, number> => {
+      const out: Record<string, number> = { ...obj };
+      for (const [k, v] of Object.entries(obj)) {
+        const nk = renameKey(k);
+        if (nk !== k) { out[nk] = (out[nk] ?? 0) + v; delete out[k]; }
+      }
+      return out;
+    };
+    order.cafeItems = rekey(order.cafeItems);
+    order.foodItems = rekey(order.foodItems);
+    const newOpts: typeof order.itemOptions = {};
+    for (const [k, v] of Object.entries(order.itemOptions ?? {})) newOpts[renameKey(k)] = v;
+    order.itemOptions = newOpts;
+  }
+}
+
 export function updateMenuItem(id: number, data: { name?: string; price?: number }): void {
-  if (data.name !== undefined) db.prepare('UPDATE menu_items SET name = ? WHERE id = ?').run(data.name, id);
+  if (data.name !== undefined) {
+    const old = db.prepare('SELECT name FROM menu_items WHERE id = ?').get(id) as { name: string } | undefined;
+    db.prepare('UPDATE menu_items SET name = ? WHERE id = ?').run(data.name, id);
+    if (old && old.name !== data.name) renameInOrders(old.name, data.name);
+  }
   if (data.price !== undefined) db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
 }
 
