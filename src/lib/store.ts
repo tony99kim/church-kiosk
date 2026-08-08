@@ -266,7 +266,9 @@ export function getOrders(): Order[] {
 
 function broadcast() {
   const data = JSON.stringify(getOrders());
-  state.clients.forEach(fn => { try { fn(data); } catch {} });
+  for (const fn of state.clients) {
+    try { fn(data); } catch { state.clients.delete(fn); }
+  }
 }
 
 export function addClient(fn: SendFn) { state.clients.add(fn); }
@@ -310,13 +312,14 @@ function snapshotPrices(names: string[]): Record<string, number> {
   return out;
 }
 
-const stmtInsert = db.prepare(
-  'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options, payment_method, item_prices) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-);
-const stmtUpdate = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
-
-const stmtGetStock      = db.prepare('SELECT stock FROM menu_items WHERE name = ? AND stock IS NOT NULL');
-const stmtGetLinkedItem = db.prepare('SELECT mi.name FROM option_items oi JOIN menu_items mi ON oi.linked_menu_item_id = mi.id WHERE oi.name = ?');
+const stmtInsert       = db.prepare('INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options, payment_method, item_prices) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+const stmtUpdate       = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
+const stmtGetStock     = db.prepare('SELECT stock FROM menu_items WHERE name = ? AND stock IS NOT NULL');
+const stmtGetLinkedItem= db.prepare('SELECT mi.name FROM option_items oi JOIN menu_items mi ON oi.linked_menu_item_id = mi.id WHERE oi.name = ?');
+const stmtDecrStock    = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL AND stock > 0');
+const stmtRestoreStock = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
+const stmtDeductStock  = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL');
+const stmtGetItemPrices= db.prepare('SELECT item_prices FROM orders WHERE id = ?');
 
 export function createOrder(
   cafeItems: Record<string, number>,
@@ -365,7 +368,6 @@ export function createOrder(
   if (hasCafe) { assignSlot(state.cafeSlots, order, 'cafeSlot'); assignSlot(state.cafePickupSlots, order, 'cafePickupSlot'); }
   if (hasFood) { assignSlot(state.foodSlots, order, 'foodSlot'); assignSlot(state.foodPickupSlots, order, 'foodPickupSlot'); }
   const itemPrices = snapshotPrices([...new Set(Object.keys(qtyByBase))]);
-  const stmtDecrStock = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL AND stock > 0');
   db.transaction(() => {
     stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
       order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions), paymentMethod, JSON.stringify(itemPrices));
@@ -499,9 +501,6 @@ export function editOrder(
   const oldLinked = linkedQtys(order.cafeItems, order.foodItems, order.itemOptions ?? {});
   const newLinked = linkedQtys(newCafeItems, newFoodItems, newItemOptions);
 
-  const stmtRestore = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
-  const stmtDeduct  = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL');
-
   db.transaction(() => {
     // 직접 항목 재고 diff — baseName으로 집계해서 "(2)" suffix 붙은 항목도 올바르게 처리
     const oldAll = { ...order.cafeItems, ...order.foodItems };
@@ -512,17 +511,17 @@ export function editOrder(
       diffByBase[base] = (diffByBase[base] ?? 0) + (oldAll[name] ?? 0) - (newAll[name] ?? 0);
     }
     for (const [base, diff] of Object.entries(diffByBase)) {
-      if (diff > 0) stmtRestore.run(diff, base);
-      else if (diff < 0) stmtDeduct.run(-diff, base);
+      if (diff > 0) stmtRestoreStock.run(diff, base);
+      else if (diff < 0) stmtDeductStock.run(-diff, base);
     }
     // 옵션 연동 재고 diff (linked.name은 이미 DB의 base name)
     for (const name of new Set([...Object.keys(oldLinked), ...Object.keys(newLinked)])) {
       const diff = (oldLinked[name] ?? 0) - (newLinked[name] ?? 0);
-      if (diff > 0) stmtRestore.run(diff, name);
-      else if (diff < 0) stmtDeduct.run(-diff, name);
+      if (diff > 0) stmtRestoreStock.run(diff, name);
+      else if (diff < 0) stmtDeductStock.run(-diff, name);
     }
     const existingPrices = JSON.parse(
-      (db.prepare('SELECT item_prices FROM orders WHERE id = ?').get(id) as { item_prices: string } | undefined)?.item_prices || '{}'
+      (stmtGetItemPrices.get(id) as { item_prices: string } | undefined)?.item_prices || '{}'
     ) as Record<string, number>;
     const newNames = [...new Set([...Object.keys(newCafeItems), ...Object.keys(newFoodItems)].map(baseName))].filter(n => !(n in existingPrices));
     const mergedPrices = { ...existingPrices, ...snapshotPrices(newNames) };
@@ -717,7 +716,6 @@ export function cancelOrder(id: number): boolean {
   if (foodPickupSlot)  state.foodPickupSlots[foodPickupSlot - 1]   = null;
 
   state.orders.delete(id);
-  const stmtRestoreStock = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
   db.transaction(() => {
     db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?').run(id);
     for (const [name, qty] of Object.entries(order.cafeItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
