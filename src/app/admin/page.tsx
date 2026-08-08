@@ -35,6 +35,7 @@ export default function AdminPage() {
   const [selectedDate, setSelectedDate] = useState<string>(todayKST());
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [calMonth, setCalMonth] = useState(() => todayKST().slice(0, 7));
+  const [calOpen, setCalOpen] = useState(false);
   const formatDate = (d: string) => { const [y, m, day] = d.split('-'); return `${y}년 ${Number(m)}월 ${Number(day)}일`; };
 
   const saveField = async () => {
@@ -424,57 +425,71 @@ export default function AdminPage() {
       {/* ── 판매 통계 ── */}
       {tab === 'stats' && (
         <div className="p-6 max-w-3xl mx-auto">
-          {/* 날짜 선택 캘린더 */}
+          {/* 날짜 선택 */}
           {(() => {
+            const today = todayKST();
+            const displayLabel = selectedDate
+              ? formatDate(selectedDate) + (selectedDate === today ? ' (오늘)' : '')
+              : '전체 기간';
             const [cy, cm] = calMonth.split('-').map(Number);
-            const firstDow = (new Date(cy, cm - 1, 1).getDay() + 6) % 7; // 0=월
+            const firstDow = (new Date(cy, cm - 1, 1).getDay() + 6) % 7;
             const totalDays = new Date(cy, cm, 0).getDate();
             const cells: (string | null)[] = Array(firstDow).fill(null);
             for (let d = 1; d <= totalDays; d++) cells.push(`${calMonth}-${String(d).padStart(2, '0')}`);
-            const availSet = new Set(availableDates);
-            const today = todayKST();
+            const availSet = new Set([...availableDates, today]); // 오늘은 항상 선택 가능
             const shiftMonth = (delta: number) => {
               const d = new Date(cy, cm - 1 + delta, 1);
               setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
             };
+            const pickDate = (date: string) => { setSelectedDate(date); setCalOpen(false); };
             return (
-              <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <button onClick={() => shiftMonth(-1)} className="text-slate-400 hover:text-slate-700 text-2xl px-2 py-1">‹</button>
-                  <span className="text-base font-bold text-slate-700">{cy}년 {cm}월</span>
-                  <button onClick={() => shiftMonth(1)} className="text-slate-400 hover:text-slate-700 text-2xl px-2 py-1">›</button>
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 mb-4">
+                <div className="flex items-center gap-2 p-3">
+                  <button onClick={() => setCalOpen(o => !o)}
+                    className="flex-1 flex items-center justify-between px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium hover:border-blue-300 transition-colors">
+                    <span>📅 {displayLabel}</span>
+                    <span className="text-slate-400 text-xs">{calOpen ? '▲' : '▼'}</span>
+                  </button>
+                  <button onClick={() => { setSelectedDate(''); setCalOpen(false); }}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-colors shrink-0 ${!selectedDate ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                    전체
+                  </button>
                 </div>
-                <div className="grid grid-cols-7 text-center mb-1">
-                  {['월','화','수','목','금','토','일'].map(d => (
-                    <div key={d} className="text-xs text-slate-400 font-medium py-1">{d}</div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-7 gap-1">
-                  {cells.map((date, i) => {
-                    if (!date) return <div key={i} />;
-                    const hasData = availSet.has(date);
-                    const isSelected = selectedDate === date;
-                    const isToday = date === today;
-                    return (
-                      <button key={date} disabled={!hasData}
-                        onClick={() => { setSelectedDate(date); setStats(null); }}
-                        className={[
-                          'aspect-square rounded-xl text-sm font-bold flex items-center justify-center transition-colors',
-                          isSelected ? 'bg-blue-600 text-white' :
-                            hasData ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 active:bg-blue-200' :
-                            'text-slate-200 cursor-default',
-                          isToday && !isSelected ? 'ring-2 ring-blue-300' : '',
-                        ].join(' ')}>
-                        {Number(date.split('-')[2])}
-                      </button>
-                    );
-                  })}
-                </div>
-                <button
-                  onClick={() => { setSelectedDate(''); setStats(null); }}
-                  className={`mt-3 w-full py-2 rounded-xl text-sm font-bold transition-colors ${!selectedDate ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-                  전체 기간
-                </button>
+                {calOpen && (
+                  <div className="px-3 pb-3 border-t border-slate-100">
+                    <div className="flex items-center justify-between py-2">
+                      <button onClick={() => shiftMonth(-1)} className="text-slate-400 hover:text-slate-700 text-xl px-2">‹</button>
+                      <span className="text-sm font-bold text-slate-700">{cy}년 {cm}월</span>
+                      <button onClick={() => shiftMonth(1)} className="text-slate-400 hover:text-slate-700 text-xl px-2">›</button>
+                    </div>
+                    <div className="grid grid-cols-7 text-center mb-0.5">
+                      {['월','화','수','목','금','토','일'].map(d => (
+                        <div key={d} className="text-xs text-slate-400 font-medium py-1">{d}</div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-7 gap-0.5">
+                      {cells.map((date, i) => {
+                        if (!date) return <div key={i} />;
+                        const hasData = availSet.has(date);
+                        const isSelected = selectedDate === date;
+                        const isToday = date === today;
+                        return (
+                          <button key={date} disabled={!hasData}
+                            onClick={() => pickDate(date)}
+                            className={[
+                              'py-1.5 rounded-lg text-xs font-bold transition-colors',
+                              isSelected ? 'bg-blue-600 text-white' :
+                                hasData ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' :
+                                'text-slate-200 cursor-default',
+                              isToday && !isSelected ? 'ring-1 ring-blue-400' : '',
+                            ].join(' ')}>
+                            {Number(date.split('-')[2])}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}
