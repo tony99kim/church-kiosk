@@ -444,7 +444,7 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 text-center">
                   <p className="text-slate-500 text-base">총 주문</p>
-                  <p className="text-7xl font-black text-blue-600 my-2">{stats.totalOrders}</p>
+                  <p className="text-4xl font-black text-blue-600 my-2">{stats.totalOrders}</p>
                   <p className="text-slate-500">건</p>
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 text-center">
