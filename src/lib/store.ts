@@ -321,6 +321,7 @@ const stmtDeductStock     = db.prepare('UPDATE menu_items SET stock = MAX(0, sto
 const stmtGetItemPrices   = db.prepare('SELECT item_prices FROM orders WHERE id = ?');
 const stmtCancelOrder     = db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?');
 const stmtSnapshotPrice   = db.prepare('SELECT price FROM menu_items WHERE name = ?');
+const stmtWriteItemPrices = db.prepare('UPDATE orders SET item_prices = ? WHERE id = ?');
 
 export function createOrder(
   cafeItems: Record<string, number>,
@@ -483,7 +484,7 @@ export function updateMenuItem(id: number, data: { name?: string; price?: number
           const referenced = Object.keys({ ...cafe, ...food }).some(n => baseName(n) === item.name);
           if (referenced && !(item.name in prices)) {
             prices[item.name] = item.price;
-            db.prepare('UPDATE orders SET item_prices = ? WHERE id = ?').run(JSON.stringify(prices), order.id);
+            stmtWriteItemPrices.run(JSON.stringify(prices), order.id);
           }
         }
         db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
@@ -599,7 +600,7 @@ export function deleteMenuItem(id: number): boolean {
       const referenced = Object.keys({ ...cafe, ...food }).some(n => baseName(n) === item.name);
       if (referenced && !(item.name in prices)) {
         prices[item.name] = item.price;
-        db.prepare('UPDATE orders SET item_prices = ? WHERE id = ?').run(JSON.stringify(prices), order.id);
+        stmtWriteItemPrices.run(JSON.stringify(prices), order.id);
       }
     }
     for (const gid of gids) db.prepare('DELETE FROM option_items WHERE group_id = ?').run(gid);
@@ -669,7 +670,7 @@ export function applyLegacyPrices(prices: Record<string, number>, date?: string)
         const b = baseName(n);
         if (b in prices && !(b in existing)) { existing[b] = prices[b]; changed = true; }
       }
-      if (changed) db.prepare('UPDATE orders SET item_prices = ? WHERE id = ?').run(JSON.stringify(existing), row.id);
+      if (changed) stmtWriteItemPrices.run(JSON.stringify(existing), row.id);
     }
   })();
 }
@@ -917,10 +918,12 @@ export function resetOrdersByDate(date: string): void {
     db.prepare("DELETE FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ?").run(date);
   })();
   for (const id of allIds) state.orders.delete(id);
-  state.cafeSlots        = Array(10).fill(null);
-  state.foodSlots        = Array(10).fill(null);
-  state.cafePickupSlots  = Array(10).fill(null);
-  state.foodPickupSlots  = Array(10).fill(null);
+  // 남은 주문 기준으로 슬롯 재배정 (전체 초기화 아님 — 다른 날짜 활성 주문 슬롯 보존)
+  const { cafe, food, cafePU, foodPU } = initSlots(state.orders);
+  state.cafeSlots       = cafe;
+  state.foodSlots       = food;
+  state.cafePickupSlots = cafePU;
+  state.foodPickupSlots = foodPU;
   broadcast();
 }
 
