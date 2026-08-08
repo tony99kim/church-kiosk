@@ -12,9 +12,12 @@ export async function GET(req: NextRequest) {
 
   const summarySection = [
     '[품목별 집계]',
-    '품목,수량',
-    ...directItems.map(s => `${s.name},${s.qty}`),
-    ...(optionItems.length > 0 ? ['[세트 옵션 집계]', ...optionItems.map(s => `${s.name},${s.qty}`)] : []),
+    '품목,단가,수량,소계',
+    ...directItems.map(s => {
+      const unitPrice = s.qty > 0 ? Math.round(s.subtotal / s.qty) : 0;
+      return `${s.name},${unitPrice},${s.qty},${s.subtotal}`;
+    }),
+    ...(optionItems.length > 0 ? ['[세트 옵션 집계]', '품목,수량', ...optionItems.map(s => `${s.name},${s.qty}`)] : []),
     '',
   ].join('\n');
 

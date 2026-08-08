@@ -733,26 +733,33 @@ export function getStats(date?: string) {
   return { totalOrders: rows.length, cafeItems, foodItems, optionItems, totalRevenue, itemRevenue };
 }
 
-export function getItemSummary(date?: string): { name: string; qty: number; isOption: boolean }[] {
+export function getItemSummary(date?: string): { name: string; qty: number; subtotal: number; isOption: boolean }[] {
   const sql = date
-    ? "SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0 AND date(created_at/1000, 'unixepoch', '+9 hours') = ?"
-    : 'SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0';
+    ? "SELECT cafe_items, food_items, item_options, item_prices FROM orders WHERE cancelled = 0 AND date(created_at/1000, 'unixepoch', '+9 hours') = ?"
+    : 'SELECT cafe_items, food_items, item_options, item_prices FROM orders WHERE cancelled = 0';
   const rows = (date ? db.prepare(sql).all(date) : db.prepare(sql).all()) as Array<{
-    cafe_items: string; food_items: string; item_options: string;
+    cafe_items: string; food_items: string; item_options: string; item_prices: string;
   }>;
+  const fallback = new Map(
+    (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
+  );
   const direct: Record<string, number> = {};
+  const directRev: Record<string, number> = {};
   const options: Record<string, number> = {};
 
   for (const row of rows) {
     let cafe: Record<string, number> = {};
     let food: Record<string, number> = {};
     let opts: Record<string, unknown> = {};
+    let prices: Record<string, number> = {};
     try { cafe = JSON.parse(row.cafe_items); } catch {}
     try { food = JSON.parse(row.food_items); } catch {}
     try { opts = JSON.parse(row.item_options || '{}'); } catch {}
+    try { prices = JSON.parse(row.item_prices || '{}'); } catch {}
+    const price = (k: string) => k in prices ? prices[k] : (fallback.get(k) ?? 0);
 
-    for (const [n, q] of Object.entries(cafe)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; }
-    for (const [n, q] of Object.entries(food)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; }
+    for (const [n, q] of Object.entries(cafe)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; directRev[k] = (directRev[k] ?? 0) + price(k) * q; }
+    for (const [n, q] of Object.entries(food)) if (q > 0) { const k = baseName(n); direct[k] = (direct[k] ?? 0) + q; directRev[k] = (directRev[k] ?? 0) + price(k) * q; }
 
     for (const [itemName, groupMap] of Object.entries(opts)) {
       if (!groupMap || typeof groupMap !== 'object' || Array.isArray(groupMap)) continue;
@@ -769,8 +776,8 @@ export function getItemSummary(date?: string): { name: string; qty: number; isOp
   }
 
   return [
-    ...Object.entries(direct).map(([name, qty]) => ({ name, qty, isOption: false })),
-    ...Object.entries(options).map(([name, qty]) => ({ name, qty, isOption: true })),
+    ...Object.entries(direct).map(([name, qty]) => ({ name, qty, subtotal: directRev[name] ?? 0, isOption: false })),
+    ...Object.entries(options).map(([name, qty]) => ({ name, qty, subtotal: 0, isOption: true })),
   ];
 }
 
