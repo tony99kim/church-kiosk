@@ -335,7 +335,7 @@ export default function KioskPage() {
       <div className="shrink-0 bg-white border-t border-slate-200">
         {/* 카트 목록 */}
         {cart.length > 0 && (
-          <div className="max-h-32 overflow-y-auto px-4 pt-3 space-y-1">
+          <div className="max-h-32 overflow-y-scroll overscroll-y-contain px-4 pt-3 space-y-1" style={{ touchAction: 'pan-y' }}>
             {cart.map(entry => {
               const item = menus.find(m => m.id === entry.itemId);
               if (!item) return null;
