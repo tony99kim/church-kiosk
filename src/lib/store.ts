@@ -304,22 +304,23 @@ function freePickupAndReassign(slots: (number | null)[], order: Order, slotKey: 
 
 // 주문 시점 가격 스냅샷 — 이후 메뉴 이름/가격 변경이 기존 통계에 영향 없도록
 function snapshotPrices(names: string[]): Record<string, number> {
-  const stmt = db.prepare('SELECT price FROM menu_items WHERE name = ?');
   const out: Record<string, number> = {};
   for (const n of names) {
-    if (!(n in out)) out[n] = (stmt.get(n) as { price: number } | undefined)?.price ?? 0;
+    if (!(n in out)) out[n] = (stmtSnapshotPrice.get(n) as { price: number } | undefined)?.price ?? 0;
   }
   return out;
 }
 
-const stmtInsert       = db.prepare('INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options, payment_method, item_prices) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-const stmtUpdate       = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
-const stmtGetStock     = db.prepare('SELECT stock FROM menu_items WHERE name = ? AND stock IS NOT NULL');
-const stmtGetLinkedItem= db.prepare('SELECT mi.name FROM option_items oi JOIN menu_items mi ON oi.linked_menu_item_id = mi.id WHERE oi.name = ?');
-const stmtDecrStock    = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL AND stock > 0');
-const stmtRestoreStock = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
-const stmtDeductStock  = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL');
-const stmtGetItemPrices= db.prepare('SELECT item_prices FROM orders WHERE id = ?');
+const stmtInsert          = db.prepare('INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options, payment_method, item_prices) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+const stmtUpdate          = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
+const stmtGetStock        = db.prepare('SELECT stock FROM menu_items WHERE name = ? AND stock IS NOT NULL');
+const stmtGetLinkedItem   = db.prepare('SELECT mi.name FROM option_items oi JOIN menu_items mi ON oi.linked_menu_item_id = mi.id WHERE oi.name = ?');
+const stmtDecrStock       = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL AND stock > 0');
+const stmtRestoreStock    = db.prepare('UPDATE menu_items SET stock = stock + ? WHERE name = ? AND stock IS NOT NULL');
+const stmtDeductStock     = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL');
+const stmtGetItemPrices   = db.prepare('SELECT item_prices FROM orders WHERE id = ?');
+const stmtCancelOrder     = db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?');
+const stmtSnapshotPrice   = db.prepare('SELECT price FROM menu_items WHERE name = ?');
 
 export function createOrder(
   cafeItems: Record<string, number>,
@@ -732,7 +733,7 @@ export function cancelOrder(id: number): boolean {
 
   state.orders.delete(id);
   db.transaction(() => {
-    db.prepare('UPDATE orders SET cancelled = 1 WHERE id = ?').run(id);
+    stmtCancelOrder.run(id);
     for (const [name, qty] of Object.entries(order.cafeItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
     for (const [name, qty] of Object.entries(order.foodItems)) if (qty > 0) stmtRestoreStock.run(qty, name);
     // 옵션에 연동된 메뉴 아이템 재고 복원
@@ -777,7 +778,7 @@ export function resetOrdersByDate(date: string): void {
     "SELECT id FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ?"
   ).all(date) as { id: number }[]).map(r => r.id);
   if (ids.length === 0) return;
-  db.prepare(`DELETE FROM orders WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+  db.prepare("DELETE FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ?").run(date);
   for (const id of ids) state.orders.delete(id);
   state.cafeSlots        = Array(10).fill(null);
   state.foodSlots        = Array(10).fill(null);
