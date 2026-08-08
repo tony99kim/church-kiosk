@@ -1,9 +1,11 @@
 export const dynamic = 'force-dynamic';
+import { NextRequest } from 'next/server';
 import { getOrdersForExport, getItemSummary } from '@/lib/store';
 
-export async function GET() {
-  const summary = getItemSummary();
-  const rows = getOrdersForExport();
+export async function GET(req: NextRequest) {
+  const date = req.nextUrl.searchParams.get('date') ?? undefined;
+  const summary = getItemSummary(date);
+  const rows = getOrdersForExport(date);
 
   const directItems = summary.filter(s => !s.isOption);
   const optionItems = summary.filter(s => s.isOption);
@@ -23,8 +25,9 @@ export async function GET() {
 
   const csv = `﻿${summarySection}\n${detailHeader}\n${detailBody}`;
 
-  const d = new Date();
-  const filename = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_판매통계.csv`;
+  const filename = date
+    ? `${date}_판매통계.csv`
+    : (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_판매통계_전체.csv`; })();
 
   return new Response(csv, {
     headers: {

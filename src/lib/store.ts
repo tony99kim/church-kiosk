@@ -568,8 +568,17 @@ function baseName(name: string): string {
   return name.replace(/ \(\d+\)$/, '');
 }
 
-export function getStats() {
-  const rows = db.prepare('SELECT cafe_items, food_items, item_options, item_prices FROM orders WHERE cancelled = 0').all() as Array<{
+export function getAvailableDates(): string[] {
+  return (db.prepare(
+    "SELECT DISTINCT date(created_at/1000, 'unixepoch', '+9 hours') as d FROM orders WHERE cancelled = 0 ORDER BY d DESC"
+  ).all() as { d: string }[]).map(r => r.d);
+}
+
+export function getStats(date?: string) {
+  const sql = date
+    ? "SELECT cafe_items, food_items, item_options, item_prices FROM orders WHERE cancelled = 0 AND date(created_at/1000, 'unixepoch', '+9 hours') = ?"
+    : 'SELECT cafe_items, food_items, item_options, item_prices FROM orders WHERE cancelled = 0';
+  const rows = (date ? db.prepare(sql).all(date) : db.prepare(sql).all()) as Array<{
     cafe_items: string; food_items: string; item_options: string; item_prices: string;
   }>;
   // 현재 가격은 item_prices 없는 구형 주문의 fallback용
@@ -618,8 +627,11 @@ export function getStats() {
   return { totalOrders: rows.length, cafeItems, foodItems, optionItems, totalRevenue, itemRevenue };
 }
 
-export function getItemSummary(): { name: string; qty: number; isOption: boolean }[] {
-  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0').all() as Array<{
+export function getItemSummary(date?: string): { name: string; qty: number; isOption: boolean }[] {
+  const sql = date
+    ? "SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0 AND date(created_at/1000, 'unixepoch', '+9 hours') = ?"
+    : 'SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0';
+  const rows = (date ? db.prepare(sql).all(date) : db.prepare(sql).all()) as Array<{
     cafe_items: string; food_items: string; item_options: string;
   }>;
   const direct: Record<string, number> = {};
@@ -656,11 +668,14 @@ export function getItemSummary(): { name: string; qty: number; isOption: boolean
   ];
 }
 
-export function getOrdersForExport() {
+export function getOrdersForExport(date?: string) {
   const fallbackPriceMap = new Map(
     (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
   );
-  const rows = db.prepare('SELECT * FROM orders ORDER BY id').all() as DbRow[];
+  const sql = date
+    ? "SELECT * FROM orders WHERE date(created_at/1000, 'unixepoch', '+9 hours') = ? ORDER BY id"
+    : 'SELECT * FROM orders ORDER BY id';
+  const rows = (date ? db.prepare(sql).all(date) : db.prepare(sql).all()) as DbRow[];
 
   return rows.map(r => {
     const d = new Date(r.created_at);

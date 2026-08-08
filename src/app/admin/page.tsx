@@ -31,6 +31,10 @@ export default function AdminPage() {
   const [editingStockId, setEditingStockId] = useState<number | null>(null);
   const [editingStockVal, setEditingStockVal] = useState('');
   const [editingField, setEditingField] = useState<{ id: number; field: 'name' | 'price'; val: string } | null>(null);
+  const todayKST = () => { const kst = new Date(Date.now() + 9 * 60 * 60 * 1000); return kst.toISOString().slice(0, 10); };
+  const [selectedDate, setSelectedDate] = useState<string>(todayKST());
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const formatDate = (d: string) => { const [y, m, day] = d.split('-'); return `${y}년 ${Number(m)}월 ${Number(day)}일`; };
 
   const saveField = async () => {
     if (!editingField) return;
@@ -118,10 +122,14 @@ export default function AdminPage() {
   };
 
   const loadMenus = useCallback(() => fetch('/api/menu').then(r => r.json()).then(setMenus), []);
-  const loadStats = useCallback(() => fetch('/api/stats').then(r => r.json()).then(setStats), []);
+  const loadStats = useCallback(() => {
+    const url = selectedDate ? `/api/stats?date=${selectedDate}` : '/api/stats';
+    return fetch(url).then(r => r.json()).then(setStats);
+  }, [selectedDate]);
+  const loadDates = useCallback(() => fetch('/api/admin/dates').then(r => r.json()).then(setAvailableDates), []);
 
   useEffect(() => { loadMenus(); }, [loadMenus]);
-  useEffect(() => { if (tab === 'stats') loadStats(); }, [tab, loadStats]);
+  useEffect(() => { if (tab === 'stats') { loadDates(); loadStats(); } }, [tab, loadStats, loadDates]);
 
   const addMenu = async () => {
     if (!newName.trim()) return;
@@ -411,6 +419,26 @@ export default function AdminPage() {
       {/* ── 판매 통계 ── */}
       {tab === 'stats' && (
         <div className="p-6 max-w-3xl mx-auto">
+          {/* 날짜 선택 */}
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4 flex items-center gap-3">
+            <span className="text-sm font-bold text-slate-500 shrink-0">📅 날짜</span>
+            <select
+              value={selectedDate}
+              onChange={e => { setSelectedDate(e.target.value); setStats(null); }}
+              className="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-base bg-white font-medium">
+              {(() => {
+                const today = todayKST();
+                const past = availableDates.filter(d => d !== today);
+                return (
+                  <>
+                    <option value={today}>{formatDate(today)} (오늘)</option>
+                    {past.map(d => <option key={d} value={d}>{formatDate(d)}</option>)}
+                    <option value="">전체</option>
+                  </>
+                );
+              })()}
+            </select>
+          </div>
           {stats ? (
             <>
               <div className="grid grid-cols-2 gap-4 mb-4">
@@ -472,7 +500,7 @@ export default function AdminPage() {
               )}
               <div className="flex gap-3">
                 <button onClick={loadStats} className="flex-1 py-4 rounded-2xl bg-slate-100 text-slate-700 text-base font-bold hover:bg-slate-200">새로고침</button>
-                <a href="/api/admin/export" download="orders.csv" className="flex-1 py-4 rounded-2xl bg-green-600 text-white text-base font-bold text-center hover:bg-green-700">📥 CSV 다운로드</a>
+                <a href={`/api/admin/export${selectedDate ? `?date=${selectedDate}` : ''}`} download className="flex-1 py-4 rounded-2xl bg-green-600 text-white text-base font-bold text-center hover:bg-green-700">📥 CSV 다운로드</a>
                 <button onClick={resetOrders} className="flex-1 py-4 rounded-2xl bg-red-500 text-white text-base font-bold hover:bg-red-600">주문 초기화</button>
               </div>
             </>
