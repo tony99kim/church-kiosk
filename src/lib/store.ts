@@ -617,8 +617,9 @@ function baseName(name: string): string {
 }
 
 export function getUnpricedItems(): { name: string; currentPrice: number | null; orderCount: number }[] {
+  // 전체 주문 스캔 — item_prices가 부분적으로 채워진 경우도 처리
   const rows = db.prepare(
-    "SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0 AND (item_prices = '{}' OR item_prices = '' OR item_prices IS NULL)"
+    'SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0'
   ).all() as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
 
   const currentPrices = new Map(
@@ -628,23 +629,29 @@ export function getUnpricedItems(): { name: string; currentPrice: number | null;
   for (const row of rows) {
     let cafe: Record<string, number> = {};
     let food: Record<string, number> = {};
+    let prices: Record<string, number> = {};
     try { cafe = JSON.parse(row.cafe_items); } catch {}
     try { food = JSON.parse(row.food_items); } catch {}
+    try { prices = JSON.parse(row.item_prices || '{}'); } catch {}
     for (const n of Object.keys({ ...cafe, ...food })) {
       const b = baseName(n);
-      nameCount[b] = (nameCount[b] ?? 0) + 1;
+      // item_prices에도 없고 현재 메뉴에도 없는 것만 — fallback 불가한 항목
+      if (!(b in prices) && !currentPrices.has(b)) {
+        nameCount[b] = (nameCount[b] ?? 0) + 1;
+      }
     }
   }
   return Object.entries(nameCount).map(([name, orderCount]) => ({
     name,
-    currentPrice: currentPrices.get(name) ?? null,
+    currentPrice: null,
     orderCount,
   })).sort((a, b) => b.orderCount - a.orderCount);
 }
 
 export function applyLegacyPrices(prices: Record<string, number>): void {
+  // 전체 주문 스캔 — 부분적으로 채워진 item_prices도 처리
   const rows = db.prepare(
-    "SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0 AND (item_prices = '{}' OR item_prices = '' OR item_prices IS NULL)"
+    'SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0'
   ).all() as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
 
   db.transaction(() => {
