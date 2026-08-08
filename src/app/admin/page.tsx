@@ -4,6 +4,7 @@ import { useOrders } from '@/lib/useOrders';
 import type { MenuItem, Order } from '@/lib/store';
 
 interface Stats { totalOrders: number; totalRevenue: number; cafeItems: Record<string, number>; foodItems: Record<string, number>; optionItems: Record<string, number>; itemRevenue: Record<string, number>; }
+interface UnpricedItem { name: string; currentPrice: number | null; orderCount: number; }
 
 type EditGroup = { id?: number; name: string; required: boolean; maxQty: number; options: { id?: number; name: string; price: number; linkedMenuItemId?: number | null }[] };
 
@@ -36,6 +37,9 @@ export default function AdminPage() {
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [calMonth, setCalMonth] = useState(() => todayKST().slice(0, 7));
   const [calOpen, setCalOpen] = useState(false);
+  const [unpricedItems, setUnpricedItems] = useState<UnpricedItem[] | null>(null);
+  const [priceEdits, setPriceEdits] = useState<Record<string, string>>({});
+  const [fixPriceOpen, setFixPriceOpen] = useState(false);
   const formatDate = (d: string) => { const [y, m, day] = d.split('-'); return `${y}년 ${Number(m)}월 ${Number(day)}일`; };
 
   const saveField = async () => {
@@ -129,6 +133,25 @@ export default function AdminPage() {
     return fetch(url).then(r => r.json()).then(setStats);
   }, [selectedDate]);
   const loadDates = useCallback(() => fetch('/api/admin/dates').then(r => r.json()).then(setAvailableDates), []);
+
+  const loadUnpriced = () =>
+    fetch('/api/admin/fix-prices').then(r => r.json()).then((items: UnpricedItem[]) => {
+      setUnpricedItems(items);
+      setPriceEdits(Object.fromEntries(items.map(i => [i.name, i.currentPrice !== null ? String(i.currentPrice) : ''])));
+    });
+
+  const applyPrices = async () => {
+    const prices: Record<string, number> = {};
+    for (const [name, val] of Object.entries(priceEdits)) {
+      const n = Number(val);
+      if (!isNaN(n) && val.trim() !== '') prices[name] = n;
+    }
+    if (Object.keys(prices).length === 0) return;
+    await fetch('/api/admin/fix-prices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(prices) });
+    await loadUnpriced();
+    loadStats();
+    alert('적용 완료');
+  };
 
   useEffect(() => { loadMenus(); }, [loadMenus]);
   useEffect(() => { if (tab === 'stats') { loadDates(); loadStats(); } }, [tab, loadStats, loadDates]);
@@ -557,6 +580,50 @@ export default function AdminPage() {
                 <a href={`/api/admin/export${selectedDate ? `?date=${selectedDate}` : ''}`} download className="flex-1 py-4 rounded-2xl bg-green-600 text-white text-base font-bold text-center hover:bg-green-700">📥 CSV</a>
                 <button onClick={() => resetOrders(selectedDate || undefined)} className="flex-1 py-4 rounded-2xl bg-orange-400 text-white text-base font-bold hover:bg-orange-500">{selectedDate ? '날짜 초기화' : '전체 초기화'}</button>
                 <button onClick={() => resetOrders()} className="flex-1 py-4 rounded-2xl bg-red-500 text-white text-base font-bold hover:bg-red-600">전체 초기화</button>
+              </div>
+
+              {/* 구형 주문 가격 복구 */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
+                <button
+                  onClick={() => { setFixPriceOpen(o => !o); if (!fixPriceOpen && !unpricedItems) loadUnpriced(); }}
+                  className="w-full flex items-center justify-between px-5 py-4 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-2xl">
+                  <span>🛠 구형 주문 가격 복구</span>
+                  <span className="text-slate-400 text-xs">{fixPriceOpen ? '▲' : '▼'}</span>
+                </button>
+                {fixPriceOpen && (
+                  <div className="px-5 pb-5 border-t border-slate-100">
+                    <p className="text-xs text-slate-400 mt-3 mb-3">가격 스냅샷이 없는 구형 주문들입니다. 가격을 입력하고 적용하면 해당 주문의 통계에 반영됩니다.</p>
+                    {unpricedItems === null ? (
+                      <p className="text-sm text-slate-400 py-4 text-center">불러오는 중...</p>
+                    ) : unpricedItems.length === 0 ? (
+                      <p className="text-sm text-green-600 font-bold py-4 text-center">✓ 모든 주문에 가격이 기록되어 있습니다.</p>
+                    ) : (
+                      <>
+                        <div className="space-y-2 mb-4">
+                          {unpricedItems.map(item => (
+                            <div key={item.name} className="flex items-center gap-3">
+                              <span className="flex-1 text-sm font-medium text-slate-700 truncate">{item.name}</span>
+                              <span className="text-xs text-slate-400 shrink-0">{item.orderCount}건</span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <input
+                                  type="number" min="0" step="100"
+                                  value={priceEdits[item.name] ?? ''}
+                                  onChange={e => setPriceEdits(p => ({ ...p, [item.name]: e.target.value }))}
+                                  placeholder="가격 입력"
+                                  className="w-28 border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-right" />
+                                <span className="text-xs text-slate-400">원</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <button onClick={applyPrices}
+                          className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700">
+                          가격 적용
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           ) : (

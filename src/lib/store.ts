@@ -590,6 +590,55 @@ function baseName(name: string): string {
   return name.replace(/ \(\d+\)$/, '');
 }
 
+export function getUnpricedItems(): { name: string; currentPrice: number | null; orderCount: number }[] {
+  const rows = db.prepare(
+    "SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0 AND (item_prices = '{}' OR item_prices = '' OR item_prices IS NULL)"
+  ).all() as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
+
+  const currentPrices = new Map(
+    (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
+  );
+  const nameCount: Record<string, number> = {};
+  for (const row of rows) {
+    let cafe: Record<string, number> = {};
+    let food: Record<string, number> = {};
+    try { cafe = JSON.parse(row.cafe_items); } catch {}
+    try { food = JSON.parse(row.food_items); } catch {}
+    for (const n of Object.keys({ ...cafe, ...food })) {
+      const b = baseName(n);
+      nameCount[b] = (nameCount[b] ?? 0) + 1;
+    }
+  }
+  return Object.entries(nameCount).map(([name, orderCount]) => ({
+    name,
+    currentPrice: currentPrices.get(name) ?? null,
+    orderCount,
+  })).sort((a, b) => b.orderCount - a.orderCount);
+}
+
+export function applyLegacyPrices(prices: Record<string, number>): void {
+  const rows = db.prepare(
+    "SELECT id, cafe_items, food_items, item_prices FROM orders WHERE cancelled = 0 AND (item_prices = '{}' OR item_prices = '' OR item_prices IS NULL)"
+  ).all() as { id: number; cafe_items: string; food_items: string; item_prices: string }[];
+
+  db.transaction(() => {
+    for (const row of rows) {
+      let cafe: Record<string, number> = {};
+      let food: Record<string, number> = {};
+      let existing: Record<string, number> = {};
+      try { cafe = JSON.parse(row.cafe_items); } catch {}
+      try { food = JSON.parse(row.food_items); } catch {}
+      try { existing = JSON.parse(row.item_prices || '{}'); } catch {}
+      let changed = false;
+      for (const n of Object.keys({ ...cafe, ...food })) {
+        const b = baseName(n);
+        if (b in prices && !(b in existing)) { existing[b] = prices[b]; changed = true; }
+      }
+      if (changed) db.prepare('UPDATE orders SET item_prices = ? WHERE id = ?').run(JSON.stringify(existing), row.id);
+    }
+  })();
+}
+
 export function getAvailableDates(): string[] {
   return (db.prepare(
     "SELECT DISTINCT date(created_at/1000, 'unixepoch', '+9 hours') as d FROM orders WHERE cancelled = 0 ORDER BY d DESC"
