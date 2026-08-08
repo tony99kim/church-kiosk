@@ -114,6 +114,7 @@ try { db.exec('ALTER TABLE option_groups ADD COLUMN max_qty INTEGER NOT NULL DEF
 try { db.exec('ALTER TABLE menu_items ADD COLUMN stock INTEGER DEFAULT NULL'); } catch {}
 try { db.exec('ALTER TABLE option_items ADD COLUMN linked_menu_item_id INTEGER DEFAULT NULL'); } catch {}
 try { db.exec("ALTER TABLE orders ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash'"); } catch {}
+try { db.exec("ALTER TABLE orders ADD COLUMN item_prices TEXT NOT NULL DEFAULT '{}'"); } catch {}
 
 // ── 메뉴 옵션 그룹 저장 (replace all) ────────────────────────
 export function saveMenuOptions(
@@ -174,7 +175,7 @@ if (setMenuItem) {
 type DbRow = {
   id: number; cafe_items: string; food_items: string;
   cafe_status: Status; food_status: Status; created_at: number; item_options: string; cancelled: number;
-  payment_method: 'cash' | 'transfer';
+  payment_method: 'cash' | 'transfer'; item_prices: string;
 };
 
 function loadFromDb(): Map<number, Order> {
@@ -299,8 +300,18 @@ function freePickupAndReassign(slots: (number | null)[], order: Order, slotKey: 
   if (next) assignSlot(slots, next, slotKey);
 }
 
+// 주문 시점 가격 스냅샷 — 이후 메뉴 이름/가격 변경이 기존 통계에 영향 없도록
+function snapshotPrices(names: string[]): Record<string, number> {
+  const stmt = db.prepare('SELECT price FROM menu_items WHERE name = ?');
+  const out: Record<string, number> = {};
+  for (const n of names) {
+    if (!(n in out)) out[n] = (stmt.get(n) as { price: number } | undefined)?.price ?? 0;
+  }
+  return out;
+}
+
 const stmtInsert = db.prepare(
-  'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  'INSERT INTO orders (id, cafe_items, food_items, cafe_status, food_status, created_at, item_options, payment_method, item_prices) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 const stmtUpdate = db.prepare('UPDATE orders SET cafe_status = ?, food_status = ? WHERE id = ?');
 
@@ -353,10 +364,11 @@ export function createOrder(
   };
   if (hasCafe) { assignSlot(state.cafeSlots, order, 'cafeSlot'); assignSlot(state.cafePickupSlots, order, 'cafePickupSlot'); }
   if (hasFood) { assignSlot(state.foodSlots, order, 'foodSlot'); assignSlot(state.foodPickupSlots, order, 'foodPickupSlot'); }
+  const itemPrices = snapshotPrices([...new Set(Object.keys(qtyByBase))]);
   const stmtDecrStock = db.prepare('UPDATE menu_items SET stock = MAX(0, stock - ?) WHERE name = ? AND stock IS NOT NULL AND stock > 0');
   db.transaction(() => {
     stmtInsert.run(order.id, JSON.stringify(order.cafeItems), JSON.stringify(order.foodItems),
-      order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions), paymentMethod);
+      order.cafeStatus, order.foodStatus, order.createdAt, JSON.stringify(itemOptions), paymentMethod, JSON.stringify(itemPrices));
     for (const [base, total] of Object.entries(qtyByBase)) stmtDecrStock.run(total, base);
   })();
   state.orders.set(order.id, order);
@@ -449,77 +461,8 @@ export function setMenuStock(id: number, stock: number | null): void {
   db.prepare('UPDATE menu_items SET stock = ? WHERE id = ?').run(stock, id);
 }
 
-function renameInOrders(oldName: string, newName: string): void {
-  const rows = db.prepare('SELECT id, cafe_items, food_items, item_options FROM orders').all() as Array<{ id: number; cafe_items: string; food_items: string; item_options: string }>;
-  const update = db.prepare('UPDATE orders SET cafe_items = ?, food_items = ?, item_options = ? WHERE id = ?');
-
-  const renameKey = (k: string) => {
-    if (k === oldName) return newName;
-    const m = k.match(/^(.+?)( \(\d+\))$/);
-    return m && m[1] === oldName ? newName + m[2] : k;
-  };
-
-  const renameNumeric = (obj: Record<string, number>): [Record<string, number>, boolean] => {
-    let changed = false;
-    const out: Record<string, number> = { ...obj };
-    for (const [k, v] of Object.entries(obj)) {
-      const nk = renameKey(k);
-      if (nk !== k) { out[nk] = (out[nk] ?? 0) + v; delete out[k]; changed = true; }
-    }
-    return [out, changed];
-  };
-
-  db.transaction(() => {
-    for (const row of rows) {
-      let cafe: Record<string, number> = {};
-      let food: Record<string, number> = {};
-      let opts: Record<string, unknown> = {};
-      try { cafe = JSON.parse(row.cafe_items); } catch {}
-      try { food = JSON.parse(row.food_items); } catch {}
-      try { opts = JSON.parse(row.item_options || '{}'); } catch {}
-
-      const [newCafe, c1] = renameNumeric(cafe);
-      const [newFood, c2] = renameNumeric(food);
-
-      // item_options의 outer key가 메뉴 이름
-      let c3 = false;
-      const newOpts: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(opts)) {
-        const nk = renameKey(k);
-        if (nk !== k) c3 = true;
-        newOpts[nk] = v;
-      }
-
-      if (c1 || c2 || c3) {
-        update.run(JSON.stringify(newCafe), JSON.stringify(newFood), JSON.stringify(newOpts), row.id);
-      }
-    }
-  })();
-
-  // 메모리 상태도 동기화 (진행 중인 주문 표시 정확성)
-  for (const order of state.orders.values()) {
-    const rekey = (obj: Record<string, number>): Record<string, number> => {
-      const out: Record<string, number> = { ...obj };
-      for (const [k, v] of Object.entries(obj)) {
-        const nk = renameKey(k);
-        if (nk !== k) { out[nk] = (out[nk] ?? 0) + v; delete out[k]; }
-      }
-      return out;
-    };
-    order.cafeItems = rekey(order.cafeItems);
-    order.foodItems = rekey(order.foodItems);
-    const newOpts: typeof order.itemOptions = {};
-    for (const [k, v] of Object.entries(order.itemOptions ?? {})) newOpts[renameKey(k)] = v;
-    order.itemOptions = newOpts;
-  }
-}
-
 export function updateMenuItem(id: number, data: { name?: string; price?: number }): void {
-  if (data.name !== undefined) {
-    const old = db.prepare('SELECT name FROM menu_items WHERE id = ?').get(id) as { name: string } | undefined;
-    db.prepare('UPDATE menu_items SET name = ? WHERE id = ?').run(data.name, id);
-    if (old && old.name !== data.name) renameInOrders(old.name, data.name);
-  }
+  if (data.name !== undefined) db.prepare('UPDATE menu_items SET name = ? WHERE id = ?').run(data.name, id);
   if (data.price !== undefined) db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
 }
 
@@ -578,8 +521,13 @@ export function editOrder(
       if (diff > 0) stmtRestore.run(diff, name);
       else if (diff < 0) stmtDeduct.run(-diff, name);
     }
-    db.prepare('UPDATE orders SET cafe_items = ?, food_items = ?, item_options = ? WHERE id = ?')
-      .run(JSON.stringify(newCafeItems), JSON.stringify(newFoodItems), JSON.stringify(newItemOptions), id);
+    const existingPrices = JSON.parse(
+      (db.prepare('SELECT item_prices FROM orders WHERE id = ?').get(id) as { item_prices: string } | undefined)?.item_prices || '{}'
+    ) as Record<string, number>;
+    const newNames = [...new Set([...Object.keys(newCafeItems), ...Object.keys(newFoodItems)].map(baseName))].filter(n => !(n in existingPrices));
+    const mergedPrices = { ...existingPrices, ...snapshotPrices(newNames) };
+    db.prepare('UPDATE orders SET cafe_items = ?, food_items = ?, item_options = ?, item_prices = ? WHERE id = ?')
+      .run(JSON.stringify(newCafeItems), JSON.stringify(newFoodItems), JSON.stringify(newItemOptions), JSON.stringify(mergedPrices), id);
   })();
 
   order.cafeItems = newCafeItems;
@@ -622,10 +570,11 @@ function baseName(name: string): string {
 }
 
 export function getStats() {
-  const rows = db.prepare('SELECT cafe_items, food_items, item_options FROM orders WHERE cancelled = 0').all() as Array<{
-    cafe_items: string; food_items: string; item_options: string;
+  const rows = db.prepare('SELECT cafe_items, food_items, item_options, item_prices FROM orders WHERE cancelled = 0').all() as Array<{
+    cafe_items: string; food_items: string; item_options: string; item_prices: string;
   }>;
-  const priceMap = new Map(
+  // 현재 가격은 item_prices 없는 구형 주문의 fallback용
+  const fallbackPriceMap = new Map(
     (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
   );
   const cafeItems: Record<string, number> = {};
@@ -635,13 +584,17 @@ export function getStats() {
   let totalRevenue = 0;
 
   for (const row of rows) {
+    let rowPrices: Record<string, number> = {};
+    try { rowPrices = JSON.parse(row.item_prices || '{}'); } catch {}
+    const price = (k: string) => k in rowPrices ? rowPrices[k] : (fallbackPriceMap.get(k) ?? 0);
+
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.cafe_items) as Record<string, number>))
-        if (q > 0) { const k = baseName(n); cafeItems[k] = (cafeItems[k] ?? 0) + q; const rev = (priceMap.get(k) ?? 0) * q; totalRevenue += rev; itemRevenue[k] = (itemRevenue[k] ?? 0) + rev; }
+        if (q > 0) { const k = baseName(n); cafeItems[k] = (cafeItems[k] ?? 0) + q; const rev = price(k) * q; totalRevenue += rev; itemRevenue[k] = (itemRevenue[k] ?? 0) + rev; }
     } catch {}
     try {
       for (const [n, q] of Object.entries(JSON.parse(row.food_items) as Record<string, number>))
-        if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; const rev = (priceMap.get(k) ?? 0) * q; totalRevenue += rev; itemRevenue[k] = (itemRevenue[k] ?? 0) + rev; }
+        if (q > 0) { const k = baseName(n); foodItems[k] = (foodItems[k] ?? 0) + q; const rev = price(k) * q; totalRevenue += rev; itemRevenue[k] = (itemRevenue[k] ?? 0) + rev; }
     } catch {}
     let perRowCafe: Record<string, number> = {};
     let perRowFood: Record<string, number> = {};
@@ -705,7 +658,7 @@ export function getItemSummary(): { name: string; qty: number; isOption: boolean
 }
 
 export function getOrdersForExport() {
-  const priceMap = new Map(
+  const fallbackPriceMap = new Map(
     (db.prepare('SELECT name, price FROM menu_items').all() as { name: string; price: number }[]).map(m => [m.name, m.price])
   );
   const rows = db.prepare('SELECT * FROM orders ORDER BY id').all() as DbRow[];
@@ -723,10 +676,13 @@ export function getOrdersForExport() {
     try { foodItems = JSON.parse(r.food_items); } catch {}
     let rawOpts: Record<string, unknown> = {};
     try { rawOpts = JSON.parse(r.item_options || '{}'); } catch { /* empty */ }
+    let rowPrices: Record<string, number> = {};
+    try { rowPrices = JSON.parse(r.item_prices || '{}'); } catch {}
+    const price = (k: string) => k in rowPrices ? rowPrices[k] : (fallbackPriceMap.get(k) ?? 0);
 
     let total = 0;
-    for (const [n, q] of Object.entries(cafeItems)) if (q > 0) total += (priceMap.get(baseName(n)) ?? 0) * q;
-    for (const [n, q] of Object.entries(foodItems)) if (q > 0) total += (priceMap.get(baseName(n)) ?? 0) * q;
+    for (const [n, q] of Object.entries(cafeItems)) if (q > 0) total += price(baseName(n)) * q;
+    for (const [n, q] of Object.entries(foodItems)) if (q > 0) total += price(baseName(n)) * q;
 
     // baseName으로 (2)/(3) suffix 항목을 합산해서 표시
     const mergedItems: Record<string, number> = {};
