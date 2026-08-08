@@ -465,8 +465,34 @@ export function setMenuStock(id: number, stock: number | null): void {
 }
 
 export function updateMenuItem(id: number, data: { name?: string; price?: number }): void {
+  if (data.price !== undefined) {
+    // 가격 변경 전에 이 메뉴를 참조하는 구형 주문(item_prices 없는)에 현재 가격을 스냅샷
+    const item = db.prepare('SELECT name, price FROM menu_items WHERE id = ?').get(id) as { name: string; price: number } | undefined;
+    if (item) {
+      const orders = db.prepare('SELECT id, cafe_items, food_items, item_prices FROM orders').all() as {
+        id: number; cafe_items: string; food_items: string; item_prices: string;
+      }[];
+      db.transaction(() => {
+        for (const order of orders) {
+          let cafe: Record<string, number> = {};
+          let food: Record<string, number> = {};
+          let prices: Record<string, number> = {};
+          try { cafe = JSON.parse(order.cafe_items); } catch {}
+          try { food = JSON.parse(order.food_items); } catch {}
+          try { prices = JSON.parse(order.item_prices || '{}'); } catch {}
+          const referenced = Object.keys({ ...cafe, ...food }).some(n => baseName(n) === item.name);
+          if (referenced && !(item.name in prices)) {
+            prices[item.name] = item.price;
+            db.prepare('UPDATE orders SET item_prices = ? WHERE id = ?').run(JSON.stringify(prices), order.id);
+          }
+        }
+        db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
+      })();
+    } else {
+      db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
+    }
+  }
   if (data.name !== undefined) db.prepare('UPDATE menu_items SET name = ? WHERE id = ?').run(data.name, id);
-  if (data.price !== undefined) db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(data.price, id);
 }
 
 export function editOrder(
